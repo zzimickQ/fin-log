@@ -9,6 +9,7 @@ import {
 import { config } from "./lib/config.js";
 import { prisma } from "./lib/db.js";
 import { registerSwagger } from "./plugins/swagger.js";
+import { registerStatic } from "./plugins/static.js";
 import { authRoutes } from "./routes/auth.js";
 import { healthRoutes } from "./routes/health.js";
 import { meRoutes } from "./routes/me.js";
@@ -63,6 +64,10 @@ export function buildApp(): FastifyInstance {
   app.register(authRoutes);
   app.register(healthRoutes);
   app.register(meRoutes);
+
+  // Last: serves the built web app + SPA fallback (no-op unless
+  // WEB_DIST_PATH is configured).
+  app.register(registerStatic);
 
   // Close the Prisma connection when the server shuts down.
   app.addHook("onClose", async () => {

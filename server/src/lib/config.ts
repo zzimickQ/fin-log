@@ -1,4 +1,5 @@
 import "dotenv/config";
+import path from "node:path";
 import { z } from "zod";
 
 const envSchema = z.object({
@@ -13,6 +14,13 @@ const envSchema = z.object({
     .min(32, "BETTER_AUTH_SECRET must be at least 32 characters"),
   BETTER_AUTH_URL: z.url(),
   WEB_ORIGIN: z.array(z.url()),
+  // Path to a built web app (dist/) to serve as static files. When unset,
+  // the API server does not host any frontend. Relative paths are resolved
+  // against the working directory (@fastify/static requires an absolute path).
+  WEB_DIST_PATH: z
+    .string()
+    .optional()
+    .transform((p) => (p ? path.resolve(p) : undefined)),
 });
 
 const parsed = envSchema.safeParse({

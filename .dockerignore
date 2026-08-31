@@ -1,0 +1,10 @@
+# Build context = repo root. Keep the context small and free of secrets.
+#
+# NOTE: web/dist and server/dist are intentionally NOT excluded — the
+# packaging Dockerfile expects the built outputs in the context.
+.git
+**/node_modules
+**/.env
+**/*.log
+**/.DS_Store
+server/src/generated

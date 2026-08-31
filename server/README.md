@@ -12,6 +12,7 @@ server (`http://localhost:3000`).
 | HTTP         | [Fastify](https://fastify.dev) 5                                    |
 | Validation   | [Zod](https://zod.dev) 4 via `fastify-type-provider-zod`            |
 | OpenAPI docs | `@fastify/swagger` + `@fastify/swagger-ui` (Swagger UI at `/docs`)  |
+| Static hosting | `@fastify/static` — serves the built web app + SPA fallback        |
 | Database     | PostgreSQL 16 via Docker Compose, [Prisma](https://prisma.io) 7 ORM |
 | Auth         | [Better Auth](https://better-auth.com) 1.7 (email/password)         |
 
@@ -48,6 +49,40 @@ Verify:
 - Better Auth ok: <http://localhost:3000/api/auth/ok>
 - Swagger UI: <http://localhost:3000/docs> (OpenAPI JSON: `/docs/json`)
 
+## Docker image
+
+The repo root `Dockerfile` is a **packaging-only** image: it does not build
+anything. It expects the built outputs (`web/dist`, `server/dist`) in the
+build context, installs production npm packages, and copies them in:
+
+```bash
+# Build the web app and the server first, then package the image:
+(cd web && npm ci && npm run build)      # → web/dist
+(cd server && npm ci && npm run build)   # → server/dist
+docker build -t finlog-server .
+docker run --rm -p 3000:3000 \
+  -e DATABASE_URL=postgresql://finlog:finlog@host.docker.internal:5433/finlog \
+  -e BETTER_AUTH_SECRET="$(openssl rand -base64 32)" \
+  -e BETTER_AUTH_URL=http://localhost:3000 \
+  -e WEB_ORIGIN=http://localhost:5173 \
+  finlog-server
+```
+
+The server serves the web app's static files itself when `WEB_DIST_PATH` is
+set (it is, in the image). Unknown GET routes that are not `/api/*` or
+`/docs/*` fall back to `index.html`, so client-side routes survive a refresh.
+
+On startup the container runs `prisma migrate deploy` (skippable with
+`SKIP_MIGRATIONS=1`, and skipped automatically when `DATABASE_URL` is unset),
+then starts the server. Static assets are served with long-lived immutable
+cache headers; `index.html`, `sw.js` and Workbox files are `no-cache`.
+
+GitHub Actions (`.github/workflows/ci.yml`) builds the web app and the server
+and uploads their `dist` folders as artifacts; the docker job downloads those
+artifacts into the build context and packages the image (no building inside
+the image). The image is pushed to GHCR (`ghcr.io/<owner>/<repo>`) on pushes
+to `main` and on `v*` tags. Pull requests build but do not push.
+
 ## Scripts
 
 | Script                  | What it does                                              |
@@ -82,7 +117,9 @@ server/
     │   ├── db.ts             # PrismaClient + @prisma/adapter-pg driver adapter
     │   └── auth.ts           # Better Auth config (email/password)
     ├── generated/prisma/     # generated Prisma client (gitignored)
-    ├── plugins/swagger.ts    # @fastify/swagger + swagger-ui, zod→OpenAPI transform
+    ├── plugins/
+    │   ├── swagger.ts        # @fastify/swagger + swagger-ui, zod→OpenAPI transform
+    │   └── static.ts         # serves the built web app + SPA fallback
     └── routes/
         ├── auth.ts           # mounts Better Auth at /api/auth/*
         ├── health.ts         # GET /health (zod-schema'd, DB check)
@@ -146,4 +183,6 @@ rules; in development, IPs resolve to `127.0.0.1` (set `NODE_ENV`).
 | `DATABASE_URL`       | —                  | Postgres connection string              |
 | `BETTER_AUTH_SECRET` | —                  | ≥32 chars (`openssl rand -base64 32`)   |
 | `BETTER_AUTH_URL`    | —                  | Public base URL of this server          |
-| `WEB_ORIGIN`         | —                  | Web app origin (CORS + trusted origins) |
+| `WEB_ORIGIN`         | —                  | Comma-separated allowed web origins     |
+| `WEB_DIST_PATH`      | unset (disabled)   | Path to a built web app to serve        |
+| `SKIP_MIGRATIONS`    | `0`                 | `1` disables migrate-on-start (container)|

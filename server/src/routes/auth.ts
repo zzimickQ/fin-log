@@ -33,10 +33,16 @@ export const authRoutes = fp(async function authRoutes(app: FastifyInstance) {
 
       // The hijacked reply bypasses Fastify's response pipeline, so add the
       // CORS headers the browser needs for credentialed cross-origin
-      // requests from the web app.
-      reply.raw.setHeader("Access-Control-Allow-Origin", config.WEB_ORIGIN);
-      reply.raw.setHeader("Access-Control-Allow-Credentials", "true");
-      reply.raw.setHeader("Vary", "Origin");
+      // requests from the web app. Echo the request Origin only when it is
+      // in the allowed list.
+      const origin = request.headers.origin;
+      const allowedOrigin =
+        origin && config.WEB_ORIGIN.includes(origin) ? origin : undefined;
+      if (allowedOrigin) {
+        reply.raw.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+        reply.raw.setHeader("Access-Control-Allow-Credentials", "true");
+        reply.raw.setHeader("Vary", "Origin");
+      }
 
       reply.hijack();
 
