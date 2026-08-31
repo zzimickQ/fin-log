@@ -3,7 +3,7 @@
 // datasource URL and schema path. Environment variables are NOT auto-loaded
 // in Prisma 7, hence the explicit `import "dotenv/config"`.
 import "dotenv/config";
-import { defineConfig, env } from "prisma/config";
+import { defineConfig } from "prisma/config";
 
 export default defineConfig({
   schema: "prisma/",
@@ -11,6 +11,8 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: env("DATABASE_URL"),
+    url:
+      process.env.DATABASE_URL ??
+      "postgresql://placeholder:placeholder@localhost:5432/placeholder",
   },
 });
