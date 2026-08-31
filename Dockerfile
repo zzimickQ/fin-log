@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # Packaging-only image for the Fin Log server + bundled web app.
 #
 # This image does NOT build anything: it expects the built outputs in the
