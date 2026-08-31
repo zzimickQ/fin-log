@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
+import { useForm } from 'react-hook-form'
 import { signUp } from '@/lib/auth-client'
+import { signUpSchema, zodFormResolver, type SignUpValues } from '@/lib/validations'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -13,30 +15,34 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 export function SignUpPage() {
-  const navigate = useNavigate()
+  const [serverError, setServerError] = useState<string | null>(null)
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<SignUpValues>({
+    resolver: zodFormResolver(signUpSchema),
+    defaultValues: { name: '', email: '', password: '' },
+  })
 
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault()
-    setError(null)
-    setSubmitting(true)
+  async function onSubmit(values: SignUpValues) {
+    setServerError(null)
     const { error } = await signUp.email({
-      name,
-      email,
-      password,
-      callbackURL: '/dashboard',
+      name: values.name,
+      email: values.email,
+      password: values.password,
+      callbackURL: '/admin/dashboard',
     })
-    setSubmitting(false)
     if (error) {
-      setError(error.message ?? 'Unable to create account')
+      setServerError(error.message ?? 'Unable to create account')
       return
     }
-    navigate('/dashboard', { replace: true })
+    // Full page load — see the comment in sign-in.tsx: the better-auth client
+    // store caches the pre-auth "no session" state, so an SPA navigate right
+    // after sign-up would send ProtectedRoute back to /sign-in. The query
+    // param makes the URL differ beyond the hash so the browser actually
+    // reloads (hash-only changes are same-document navigations).
+    window.location.href = '/?auth=ok#/admin/dashboard'
   }
 
   return (
@@ -49,17 +55,23 @@ export function SignUpPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={onSubmit} className="flex flex-col gap-4">
+          <form
+            onSubmit={(e: FormEvent) => void handleSubmit(onSubmit)(e)}
+            className="flex flex-col gap-4"
+            noValidate
+          >
             <div className="flex flex-col gap-2">
               <Label htmlFor="name">Name</Label>
               <Input
                 id="name"
                 type="text"
                 autoComplete="name"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
+                aria-invalid={errors.name ? true : undefined}
+                {...register('name')}
               />
+              {errors.name && (
+                <p className="text-sm text-destructive">{errors.name.message}</p>
+              )}
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="email">Email</Label>
@@ -67,10 +79,12 @@ export function SignUpPage() {
                 id="email"
                 type="email"
                 autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                aria-invalid={errors.email ? true : undefined}
+                {...register('email')}
               />
+              {errors.email && (
+                <p className="text-sm text-destructive">{errors.email.message}</p>
+              )}
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="password">Password</Label>
@@ -78,15 +92,20 @@ export function SignUpPage() {
                 id="password"
                 type="password"
                 autoComplete="new-password"
-                minLength={8}
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                aria-invalid={errors.password ? true : undefined}
+                {...register('password')}
               />
+              {errors.password && (
+                <p className="text-sm text-destructive">
+                  {errors.password.message}
+                </p>
+              )}
             </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" disabled={submitting}>
-              {submitting ? 'Creating account…' : 'Sign up'}
+            {serverError && (
+              <p className="text-sm text-destructive">{serverError}</p>
+            )}
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? 'Creating account…' : 'Sign up'}
             </Button>
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">

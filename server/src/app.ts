@@ -8,10 +8,15 @@ import {
 } from "fastify-type-provider-zod";
 import { config } from "./lib/config.js";
 import { prisma } from "./lib/db.js";
+import { ApiError } from "./lib/errors.js";
 import { registerSwagger } from "./plugins/swagger.js";
 import { registerStatic } from "./plugins/static.js";
 import { authRoutes } from "./routes/auth.js";
+import { categoryRoutes } from "./routes/categories.js";
+import { expenseRoutes } from "./routes/expenses.js";
+import { familyRoutes } from "./routes/families.js";
 import { healthRoutes } from "./routes/health.js";
+import { ledgerRoutes } from "./routes/ledgers.js";
 import { meRoutes } from "./routes/me.js";
 
 export function buildApp(): FastifyInstance {
@@ -32,6 +37,32 @@ export function buildApp(): FastifyInstance {
   // Zod validation errors → 400 with the issue list (instead of Fastify's
   // generic JSON-schema error shape).
   app.setErrorHandler((error, request, reply) => {
+    // Domain errors thrown by route handlers.
+    if (error instanceof ApiError) {
+      return reply.code(error.statusCode).send({
+        statusCode: error.statusCode,
+        error: "Request Error",
+        message: error.message,
+        ...(error.details !== undefined ? { details: error.details } : {}),
+      });
+    }
+    // Prisma: unique constraint violation → 409, record not found → 404.
+    const prismaError = error as { code?: string; meta?: { target?: unknown } };
+    if (prismaError.code === "P2002") {
+      return reply.code(409).send({
+        statusCode: 409,
+        error: "Conflict",
+        message: "A record with this value already exists",
+        details: prismaError.meta?.target,
+      });
+    }
+    if (prismaError.code === "P2025") {
+      return reply.code(404).send({
+        statusCode: 404,
+        error: "Not Found",
+        message: "Record not found",
+      });
+    }
     if (hasZodFastifySchemaValidationErrors(error)) {
       return reply.code(400).send({
         statusCode: 400,
@@ -64,6 +95,10 @@ export function buildApp(): FastifyInstance {
   app.register(authRoutes);
   app.register(healthRoutes);
   app.register(meRoutes);
+  app.register(familyRoutes);
+  app.register(ledgerRoutes);
+  app.register(categoryRoutes);
+  app.register(expenseRoutes);
 
   // Last: serves the built web app + SPA fallback (no-op unless
   // WEB_DIST_PATH is configured).

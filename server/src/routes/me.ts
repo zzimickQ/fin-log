@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
-import { auth } from "../lib/auth.js";
+import { requireSession } from "../lib/guards.js";
 
 const userSchema = z.object({
   id: z.string(),
@@ -26,13 +26,8 @@ export async function meRoutes(app: FastifyInstance) {
         401: errorSchema,
       },
     },
-    handler: async (request, reply) => {
-      const session = await auth.api.getSession({
-        headers: request.headers,
-      });
-      if (!session) {
-        return reply.code(401).send({ message: "Unauthorized" });
-      }
+    handler: async (request) => {
+      const session = await requireSession(request);
       return { user: session.user };
     },
   });

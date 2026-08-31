@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import { useSession, signOut } from '@/lib/auth-client'
 import { Button } from '@/components/ui/button'
+import { Toaster } from '@/components/toaster'
 import { LogOut, Wallet } from 'lucide-react'
 
 export function AppShell() {
@@ -24,8 +25,8 @@ export function AppShell() {
               Home
             </NavLink>
             {!isPending && session && (
-              <NavLink to="/dashboard" className={navLinkClass}>
-                Dashboard
+              <NavLink to="/admin/dashboard" className={navLinkClass}>
+                Admin
               </NavLink>
             )}
             {!isPending &&
@@ -49,6 +50,7 @@ export function AppShell() {
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
         <Outlet />
       </main>
+      <Toaster />
     </div>
   )
 }

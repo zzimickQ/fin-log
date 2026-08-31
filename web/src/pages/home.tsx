@@ -26,7 +26,7 @@ export function HomePage() {
         <div className="flex items-center gap-3">
           {isPending ? null : session ? (
             <Button asChild>
-              <Link to="/dashboard">
+              <Link to="/admin/dashboard">
                 Go to dashboard <ArrowRight className="size-4" />
               </Link>
             </Button>

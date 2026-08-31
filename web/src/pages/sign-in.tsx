@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
+import { useForm } from 'react-hook-form'
 import { signIn } from '@/lib/auth-client'
+import { signInSchema, zodFormResolver, type SignInValues } from '@/lib/validations'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -13,28 +15,39 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 export function SignInPage() {
-  const navigate = useNavigate()
   const location = useLocation()
   const from =
     (location.state as { from?: { pathname?: string } } | null)?.from
       ?.pathname ?? '/'
 
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
+  const [serverError, setServerError] = useState<string | null>(null)
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<SignInValues>({
+    resolver: zodFormResolver(signInSchema),
+    defaultValues: { email: '', password: '' },
+  })
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault()
-    setError(null)
-    setSubmitting(true)
-    const { error } = await signIn.email({ email, password, callbackURL: from })
-    setSubmitting(false)
+  async function onSubmit(values: SignInValues) {
+    setServerError(null)
+    const { error } = await signIn.email({
+      email: values.email,
+      password: values.password,
+      callbackURL: from,
+    })
     if (error) {
-      setError(error.message ?? 'Unable to sign in')
+      setServerError(error.message ?? 'Unable to sign in')
       return
     }
-    navigate(from, { replace: true })
+    // Full page load (not an SPA navigate): better-auth's client store caches
+    // the pre-auth "no session" state, so an in-app navigation right after
+    // signing in makes ProtectedRoute bounce back to /sign-in. Note the query
+    // param: hash-only URL changes are same-document navigations (no reload),
+    // so the URL must differ beyond the hash to force a fresh app boot that
+    // reads the session cookie.
+    window.location.href = `/?auth=ok#${from}`
   }
 
   return (
@@ -47,17 +60,25 @@ export function SignInPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={onSubmit} className="flex flex-col gap-4">
+          <form
+            onSubmit={(e: FormEvent) => void handleSubmit(onSubmit)(e)}
+            className="flex flex-col gap-4"
+            noValidate
+          >
             <div className="flex flex-col gap-2">
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
                 type="email"
                 autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                aria-invalid={errors.email ? true : undefined}
+                {...register('email')}
               />
+              {errors.email && (
+                <p className="text-sm text-destructive">
+                  {errors.email.message}
+                </p>
+              )}
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="password">Password</Label>
@@ -65,14 +86,20 @@ export function SignInPage() {
                 id="password"
                 type="password"
                 autoComplete="current-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                aria-invalid={errors.password ? true : undefined}
+                {...register('password')}
               />
+              {errors.password && (
+                <p className="text-sm text-destructive">
+                  {errors.password.message}
+                </p>
+              )}
             </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" disabled={submitting}>
-              {submitting ? 'Signing in…' : 'Sign in'}
+            {serverError && (
+              <p className="text-sm text-destructive">{serverError}</p>
+            )}
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? 'Signing in…' : 'Sign in'}
             </Button>
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">

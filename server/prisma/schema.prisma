@@ -1,1 +1,141 @@
 
+// Domain models for Fin Log.
+//
+// The schema directory (`prisma/`) is merged by Prisma: `auth-schema.prisma`
+// provides the generator, datasource and auth tables; this file adds the
+// family domain (families, ledgers, expenses, and the recursive category
+// tree).
+//
+// Key design decisions (see docs/basic-doc.md):
+//  - Categories are family-scoped (shared across all ledgers of a family).
+//  - The category hierarchy is a self-referencing tree with unlimited depth.
+//  - `Expense.categoryId` is optional: "capture first, categorize later".
+//  - `occurredAt` (when money was spent) is distinct from `createdAt`.
+//  - `paidById` (who actually paid) is distinct from `createdById` (who
+//    entered the record).
+
+enum FamilyRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model Family {
+  id   String @id @default(cuid())
+  name String
+
+  members    FamilyMember[]
+  ledgers    Ledger[]
+  categories ExpenseCategory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+  @@map("family")
+}
+
+model FamilyMember {
+  id       String     @id @default(cuid())
+  familyId String
+  userId   String
+  role     FamilyRole @default(MEMBER)
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([familyId, userId])
+  @@index([userId])
+  @@index([familyId])
+  @@map("family_member")
+}
+
+model Ledger {
+  id       String @id @default(cuid())
+  familyId String
+
+  name        String
+  description String?
+
+  family   Family    @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  expenses Expense[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([familyId])
+  @@map("ledger")
+}
+
+model Expense {
+  id       String @id @default(cuid())
+  ledgerId String
+
+  /// User who recorded the expense.
+  createdById String
+
+  /// Optional because an expense can be recorded first and categorized
+  /// later (onDelete: SetNull keeps the expense when its category is removed).
+  categoryId String?
+
+  /// Who actually paid. Optional — the person entering the expense isn't
+  /// necessarily the person who paid it.
+  paidById String?
+
+  amount Decimal @db.Decimal(14, 2)
+  currency String @default("ETB")
+
+  /// Fast-entry description such as "groceries", "taxi", "coffee".
+  description String?
+  note String?
+
+  /// When the money was actually spent (distinct from createdAt).
+  occurredAt DateTime @default(now())
+
+  ledger   Ledger           @relation(fields: [ledgerId], references: [id], onDelete: Cascade)
+  createdBy User            @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+  paidBy   User?            @relation("ExpensePaidBy", fields: [paidById], references: [id], onDelete: SetNull)
+  category ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ledgerId, occurredAt])
+  @@index([ledgerId, categoryId])
+  @@index([createdById])
+  @@index([paidById])
+  @@map("expense")
+}
+
+model ExpenseCategory {
+  id       String @id @default(cuid())
+  familyId String
+
+  name        String
+  description String?
+
+  /// Self-referencing hierarchy: null = root category, otherwise the id of
+  /// the parent category.
+  parentId String?
+
+  family   Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  parent   ExpenseCategory?  @relation("ExpenseCategoryHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children ExpenseCategory[] @relation("ExpenseCategoryHierarchy")
+  expenses Expense[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([familyId])
+  @@index([parentId])
+
+  /// Prevent duplicate sibling categories, e.g. two "Food" categories under
+  /// the same parent. (Postgres treats NULLs as distinct, so root-level
+  /// uniqueness is additionally enforced by a partial index added in the
+  /// migration, and by the service layer.)
+  @@unique([familyId, parentId, name])
+  @@map("expense_category")
+}
