@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#09090b"/>
+  <!-- wallet body -->
+  <rect x="96" y="144" width="320" height="224" rx="40" fill="none" stroke="#fafafa" stroke-width="36"/>
+  <!-- wallet flap -->
+  <path d="M96 200 h220 a32 32 0 0 1 32 32 v56" fill="none" stroke="#fafafa" stroke-width="36" stroke-linecap="round"/>
+  <!-- coin -->
+  <circle cx="356" cy="264" r="34" fill="#fafafa"/>
+</svg>

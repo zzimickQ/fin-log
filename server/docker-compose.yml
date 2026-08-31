@@ -1,0 +1,35 @@
+# Local development database for the Fin Log API server.
+#
+#   docker compose up -d     # start
+#   docker compose down      # stop (data kept in the named volume)
+#
+# Exposed on host port 5433 to avoid colliding with other Postgres instances
+# (an existing `postgres_db` container on this machine already uses 5432).
+# Override DATABASE_URL in server/.env if you change the port.
+#
+# `name: finlog` keeps the compose project distinct from other `server/`
+# folders in this workspace (compose would otherwise default to "server").
+
+name: finlog
+
+services:
+  finlog_db:
+    image: postgres:16-alpine
+    container_name: finlog_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: finlog
+      POSTGRES_PASSWORD: finlog
+      POSTGRES_DB: finlog
+    ports:
+      - "5433:5432"
+    volumes:
+      - finlog_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finlog -d finlog"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  finlog_pgdata:
