@@ -10,7 +10,7 @@ import { createAuthClient } from 'better-auth/react'
  * Override the URL per-environment via VITE_AUTH_BASE_URL (see `.env.local`).
  */
 export const authClient = createAuthClient({
-  baseURL: import.meta.env.VITE_AUTH_BASE_URL ?? 'http://localhost:3000',
+  baseURL: import.meta.env.VITE_AUTH_BASE_URL,
 })
 
 // Convenience re-exports used across the app
