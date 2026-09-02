@@ -17,6 +17,29 @@ export const ledgerRepository = {
     });
   },
 
+  /** Every ledger across many families (e.g. the navbar switcher). */
+  findByFamilies(familyIds: string[]) {
+    return prisma.ledger.findMany({
+      where: { familyId: { in: familyIds } },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        familyId: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+    });
+  },
+
+  /** Minimal family resolution for a set of ledgers (bulk operations). */
+  findByIds(ids: string[]) {
+    return prisma.ledger.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, familyId: true },
+    });
+  },
+
   create(familyId: string, data: { name: string; description?: string }) {
     return prisma.ledger.create({
       data: {

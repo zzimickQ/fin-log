@@ -7,6 +7,7 @@ import type {
   FamilyRole,
   FamilySummary,
   LedgerSummary,
+  MyLedger,
   RecentExpense,
 } from './types'
 
@@ -146,6 +147,27 @@ export const api = {
   deleteLedger: (ledgerId: string) =>
     unwrap(betterFetch<void>(`/ledgers/${ledgerId}`, { method: 'DELETE' })),
 
+  /** Count + sum of a ledger's expenses (optional occurredAt range). */
+  ledgerTotals: (ledgerId: string, from?: string, to?: string) =>
+    unwrap(
+      betterFetch<{ count: number; sum: number }>(
+        `/ledgers/${ledgerId}/totals`,
+        { query: qs({ from, to }) },
+      ),
+    ),
+
+  /**
+   * Category totals within a range, rolled up to root categories, plus the
+   * uncategorized bucket (home tab “by category” list).
+   */
+  ledgerBreakdown: (ledgerId: string, from?: string, to?: string) =>
+    unwrap(
+      betterFetch<{
+        categories: { id: string; name: string; sum: number; count: number }[]
+        uncategorized: { sum: number; count: number }
+      }>(`/ledgers/${ledgerId}/breakdown`, { query: qs({ from, to }) }),
+    ),
+
   // ---- categories ----
   getCategories: (familyId: string) =>
     unwrap(
@@ -251,6 +273,21 @@ export const api = {
     unwrap(
       betterFetch<{ expenses: RecentExpense[] }>('/expenses/recent', {
         query: qs({ limit }),
+      }),
+    ),
+
+  // ---- cross-family navigation ----
+
+  /** All ledgers across the user's families (navbar switcher). */
+  myLedgers: () =>
+    unwrap(betterFetch<{ ledgers: MyLedger[] }>('/ledgers/mine')),
+
+  /** Assign categories to many expenses in one transaction. */
+  categorizeBatch: (items: { expenseId: string; categoryId: string }[]) =>
+    unwrap(
+      betterFetch<{ count: number }>('/expenses/categorize-batch', {
+        method: 'POST',
+        body: { items },
       }),
     ),
 }

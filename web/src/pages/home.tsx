@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useSession } from '@/lib/auth-client'
+import { TodayHome } from '@/pages/today'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -10,7 +11,25 @@ import {
 } from '@/components/ui/card'
 import { ArrowRight, Download } from 'lucide-react'
 
+/**
+ * The `/` route. Signed-in users get the Today summary (their home tab);
+ * everyone else sees the marketing landing page.
+ */
 export function HomePage() {
+  const { data: session, isPending } = useSession()
+
+  if (isPending) {
+    return (
+      <div className="flex min-h-[40dvh] items-center justify-center text-sm text-muted-foreground">
+        Loading…
+      </div>
+    )
+  }
+
+  return session ? <TodayHome /> : <LandingPage />
+}
+
+function LandingPage() {
   const { data: session, isPending } = useSession()
 
   return (
@@ -26,8 +45,8 @@ export function HomePage() {
         <div className="flex items-center gap-3">
           {isPending ? null : session ? (
             <Button asChild>
-              <Link to="/admin/dashboard">
-                Go to dashboard <ArrowRight className="size-4" />
+              <Link to="/log">
+                Log an expense <ArrowRight className="size-4" />
               </Link>
             </Button>
           ) : (

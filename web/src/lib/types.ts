@@ -34,6 +34,17 @@ export interface LedgerSummary {
   createdAt: string
 }
 
+/** Flattened ledger row for the navbar switcher (GET /ledgers/mine). */
+export interface MyLedger {
+  id: string
+  name: string
+  description: string | null
+  familyId: string
+  familyName: string
+  expenseCount: number
+  uncategorizedCount: number
+}
+
 export interface CategoryNode {
   id: string
   name: string

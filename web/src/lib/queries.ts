@@ -16,7 +16,12 @@ export const queryKeys = {
   family: (familyId: string) => ['families', familyId] as const,
   expenses: (ledgerId: string, filters: LedgerFilters & { limit: number }) =>
     ['ledgers', ledgerId, 'expenses', filters] as const,
+  ledgerTotals: (ledgerId: string, from: string, to: string) =>
+    ['ledgers', ledgerId, 'totals', from, to] as const,
+  ledgerBreakdown: (ledgerId: string, from: string, to: string) =>
+    ['ledgers', ledgerId, 'breakdown', from, to] as const,
   recentExpenses: (limit: number) => ['expenses', 'recent', limit] as const,
+  myLedgers: ['ledgers', 'mine'] as const,
 }
 
 // ---------- queries ----------
@@ -60,10 +65,71 @@ export function useExpensesQuery(
   })
 }
 
+/**
+ * Every expense of a ledger within an occurredAt range (analytics). Fetches
+ * in 500-row pages until the full total is collected (capped at 20k rows).
+ */
+export function useLedgerExpensesInRangeQuery(
+  ledgerId: string | null,
+  from: string,
+  to: string,
+) {
+  return useQuery({
+    queryKey: ['ledgers', ledgerId ?? '', 'expenses', 'range', from, to],
+    queryFn: async () => {
+      const all: Awaited<ReturnType<typeof api.listExpenses>>['expenses'] = []
+      for (let page = 0; page < 40; page++) {
+        const res = await api.listExpenses(ledgerId!, {
+          from,
+          to,
+          limit: 500,
+          offset: all.length,
+        })
+        all.push(...res.expenses)
+        if (all.length >= res.total) break
+      }
+      return all
+    },
+    enabled: ledgerId !== null && Boolean(from) && Boolean(to),
+  })
+}
+
 export function useRecentExpensesQuery(limit = 8) {
   return useQuery({
     queryKey: queryKeys.recentExpenses(limit),
     queryFn: () => api.recentExpenses(limit),
+  })
+}
+
+export function useMyLedgersQuery(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.myLedgers,
+    queryFn: () => api.myLedgers(),
+    enabled,
+  })
+}
+
+export function useLedgerTotalsQuery(
+  ledgerId: string | null,
+  from: string,
+  to: string,
+) {
+  return useQuery({
+    queryKey: queryKeys.ledgerTotals(ledgerId ?? '', from, to),
+    queryFn: () => api.ledgerTotals(ledgerId!, from, to),
+    enabled: ledgerId !== null && Boolean(from) && Boolean(to),
+  })
+}
+
+export function useLedgerBreakdownQuery(
+  ledgerId: string | null,
+  from: string,
+  to: string,
+) {
+  return useQuery({
+    queryKey: queryKeys.ledgerBreakdown(ledgerId ?? '', from, to),
+    queryFn: () => api.ledgerBreakdown(ledgerId!, from, to),
+    enabled: ledgerId !== null && Boolean(from) && Boolean(to),
   })
 }
 
@@ -89,8 +155,11 @@ function clearExpenseCaches(
   familyId: string,
 ) {
   void qc.invalidateQueries({ queryKey: ['ledgers', ledgerId, 'expenses'] })
+  void qc.invalidateQueries({ queryKey: ['ledgers', ledgerId, 'totals'] })
+  void qc.invalidateQueries({ queryKey: ['ledgers', ledgerId, 'breakdown'] })
   void qc.invalidateQueries({ queryKey: queryKeys.family(familyId) })
   void qc.invalidateQueries({ queryKey: ['expenses', 'recent'] })
+  void qc.invalidateQueries({ queryKey: queryKeys.myLedgers })
 }
 
 // ---------- family mutations ----------
@@ -199,6 +268,23 @@ export function useDeleteLedgerMutation() {
     onSuccess: (_data, { ledgerId, familyId }) => {
       void invalidate([queryKeys.family(familyId)])
       void invalidate([['ledgers', ledgerId, 'expenses']])
+      void invalidate([queryKeys.myLedgers])
+    },
+    onError: onMutationError,
+  })
+}
+
+export function useUpdateLedgerMutation() {
+  const invalidate = useInvalidate()
+  return useMutation({
+    mutationFn: (args: {
+      ledgerId: string
+      familyId: string
+      data: Parameters<typeof api.updateLedger>[1]
+    }) => api.updateLedger(args.ledgerId, args.data),
+    onSuccess: (_data, { familyId }) => {
+      invalidate([queryKeys.family(familyId)])
+      invalidate([queryKeys.myLedgers])
     },
     onError: onMutationError,
   })
@@ -293,6 +379,21 @@ export function useCategorizeExpenseMutation() {
       familyId: string
       categoryId: string | null
     }) => api.categorizeExpense(args.expenseId, args.categoryId),
+    onSuccess: (_data, { ledgerId, familyId }) => {
+      clearExpenseCaches(qc, ledgerId, familyId)
+    },
+    onError: onMutationError,
+  })
+}
+
+export function useCategorizeBatchMutation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (args: {
+      ledgerId: string
+      familyId: string
+      items: { expenseId: string; categoryId: string }[]
+    }) => api.categorizeBatch(args.items),
     onSuccess: (_data, { ledgerId, familyId }) => {
       clearExpenseCaches(qc, ledgerId, familyId)
     },

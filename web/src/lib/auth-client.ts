@@ -14,4 +14,12 @@ export const authClient = createAuthClient({
 })
 
 // Convenience re-exports used across the app
-export const { useSession, signIn, signUp, signOut } = authClient
+export const {
+  useSession,
+  signIn,
+  signUp,
+  signOut,
+  updateUser,
+  changePassword,
+  getSession,
+} = authClient

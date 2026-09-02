@@ -16,11 +16,12 @@ import {
   type MoveCategoryValues,
 } from '@/lib/validations'
 import type { CategoryNode } from '@/lib/types'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
+  CardHeader,
+  CardTitle,
 } from '@/components/ui/card'
 import {
   Dialog,
@@ -39,7 +40,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { FolderPlus, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Folder, FolderPlus, Pencil, Plus, Trash2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 interface CategoryDialogState {
   mode: 'create' | 'edit'
@@ -47,6 +49,10 @@ interface CategoryDialogState {
   category?: CategoryNode
 }
 
+/**
+ * Category manager. Structure only — grouped as one card per main category,
+ * with sub-categories rendered as nested sub-cards.
+ */
 export function CategoriesPage() {
   const { familyId = '' } = useParams<{ familyId: string }>()
   const { data: family } = useFamilyQuery(familyId)
@@ -58,47 +64,48 @@ export function CategoriesPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Categories</h2>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Categories</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Shared across ledgers of the family. Main categories nest their
+            sub-categories.
+          </p>
+        </div>
         <Button size="sm" onClick={() => setDialog({ mode: 'create' })}>
           <Plus />
           New category
         </Button>
       </div>
-      <p className="-mt-2 text-sm text-muted-foreground">
-        Shared across all ledgers of the family. Categories can nest to any
-        depth — e.g. Food › Groceries › Vegetables.
-      </p>
 
       {categories.length === 0 ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            No categories yet. Create one to start organizing expenses.
+            No categories yet. Create one to organize expenses later.
           </CardContent>
         </Card>
       ) : (
-        <Card>
-          <CardContent className="py-2">
-            <ul className="flex flex-col">
-              {categories.map((node) => (
-                <TreeNode
-                  key={node.id}
-                  node={node}
-                  depth={0}
-                  onAddChild={(n) => setDialog({ mode: 'create', parentId: n.id })}
-                  onEdit={(n) => setDialog({ mode: 'edit', category: n })}
-                  onMove={setMoving}
-                  onDelete={setDeleting}
-                />
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
+        <div className="flex flex-col gap-4">
+          {categories.map((root) => (
+            <MainCategoryCard
+              key={root.id}
+              node={root}
+              onAddChild={(n) => setDialog({ mode: 'create', parentId: n.id })}
+              onEdit={(n) => setDialog({ mode: 'edit', category: n })}
+              onMove={setMoving}
+              onDelete={setDeleting}
+            />
+          ))}
+        </div>
       )}
 
       {dialog && (
         <CategoryDialog
-          key={dialog.mode === 'edit' ? `edit-${dialog.category!.id}` : `create-${dialog.parentId ?? 'root'}`}
+          key={
+            dialog.mode === 'edit'
+              ? `edit-${dialog.category!.id}`
+              : `create-${dialog.parentId ?? 'root'}`
+          }
           familyId={familyId}
           state={dialog}
           categories={categories}
@@ -125,7 +132,55 @@ export function CategoriesPage() {
   )
 }
 
-function TreeNode({
+// ---------- tree rendering: card + sub-cards ----------
+
+/** One top-level category as a card; its children are sub-cards inside. */
+function MainCategoryCard({
+  node,
+  onAddChild,
+  onEdit,
+  onMove,
+  onDelete,
+}: {
+  node: CategoryNode
+  onAddChild: (n: CategoryNode) => void
+  onEdit: (n: CategoryNode) => void
+  onMove: (n: CategoryNode) => void
+  onDelete: (n: CategoryNode) => void
+}) {
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between gap-3 px-4 py-3">
+        <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+          <Folder className="size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate">{node.name}</span>
+        </CardTitle>
+        <NodeActions node={node} onAddChild={onAddChild} onEdit={onEdit} onMove={onMove} onDelete={onDelete} />
+      </CardHeader>
+      {node.children.length > 0 && (
+        <CardContent className="flex flex-col gap-1.5 px-3 pb-3 pt-0">
+          {node.children.map((child) => (
+            <SubCategoryCard
+              key={child.id}
+              node={child}
+              depth={1}
+              onAddChild={onAddChild}
+              onEdit={onEdit}
+              onMove={onMove}
+              onDelete={onDelete}
+            />
+          ))}
+        </CardContent>
+      )}
+    </Card>
+  )
+}
+
+/**
+ * A nested category. Depth 1 renders as a sub-card; deeper levels render as
+ * indented rows inside their parent's sub-card.
+ */
+function SubCategoryCard({
   node,
   depth,
   onAddChild,
@@ -140,58 +195,39 @@ function TreeNode({
   onMove: (n: CategoryNode) => void
   onDelete: (n: CategoryNode) => void
 }) {
+  const hasChildren = node.children.length > 0
+
   return (
-    <li>
+    <div className={cn(depth === 1 && 'rounded-lg border bg-muted/40')}>
       <div
-        className="group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60"
-        style={{ marginLeft: depth * 20 }}
+        className={cn(
+          'flex items-center justify-between gap-2 py-2',
+          depth === 1 ? 'px-3' : 'px-2',
+        )}
       >
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm">{node.name}</span>
-          <Badge variant="outline" className="shrink-0 text-xs tabular-nums">
-            {node.expenseCount}
-          </Badge>
-        </div>
-        <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label={`Add child to ${node.name}`}
-            onClick={() => onAddChild(node)}
-          >
-            <Plus />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label={`Edit ${node.name}`}
-            onClick={() => onEdit(node)}
-          >
-            <Pencil />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label={`Move ${node.name}`}
-            onClick={() => onMove(node)}
-          >
-            <FolderPlus />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="text-muted-foreground hover:text-destructive"
-            aria-label={`Delete ${node.name}`}
-            onClick={() => onDelete(node)}
-          >
-            <Trash2 />
-          </Button>
-        </div>
+        <span
+          className="flex min-w-0 items-center gap-1.5 text-sm font-medium"
+          style={{ paddingLeft: depth > 1 ? 10 : 0 }}
+        >
+          <span className="truncate">{node.name}</span>
+        </span>
+        <NodeActions
+          node={node}
+          onAddChild={onAddChild}
+          onEdit={onEdit}
+          onMove={onMove}
+          onDelete={onDelete}
+        />
       </div>
-      {node.children.length > 0 && (
-        <ul className="flex flex-col">
+      {hasChildren && (
+        <div
+          className={cn(
+            'flex flex-col border-t bg-card/60',
+            depth === 1 ? 'rounded-b-lg px-2 py-1.5' : 'px-2 pb-1.5',
+          )}
+        >
           {node.children.map((child) => (
-            <TreeNode
+            <SubCategoryCard
               key={child.id}
               node={child}
               depth={depth + 1}
@@ -201,9 +237,65 @@ function TreeNode({
               onDelete={onDelete}
             />
           ))}
-        </ul>
+        </div>
       )}
-    </li>
+    </div>
+  )
+}
+
+/**
+ * Per-node actions: add child, edit, move, delete. Outlined with clear
+ * padding so the touch targets are visible on mobile.
+ */
+function NodeActions({
+  node,
+  onAddChild,
+  onEdit,
+  onMove,
+  onDelete,
+}: {
+  node: CategoryNode
+  onAddChild: (n: CategoryNode) => void
+  onEdit: (n: CategoryNode) => void
+  onMove: (n: CategoryNode) => void
+  onDelete: (n: CategoryNode) => void
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-1.5">
+      <Button
+        variant="outline"
+        aria-label={`Add sub-category under ${node.name}`}
+        title="Add sub-category"
+        onClick={() => onAddChild(node)}
+      >
+        <Plus />
+      </Button>
+      <Button
+        variant="outline"
+        aria-label={`Edit ${node.name}`}
+        title="Edit"
+        onClick={() => onEdit(node)}
+      >
+        <Pencil />
+      </Button>
+      <Button
+        variant="outline"
+        aria-label={`Move ${node.name}`}
+        title="Move"
+        onClick={() => onMove(node)}
+      >
+        <FolderPlus />
+      </Button>
+      <Button
+        variant="outline"
+        className="text-muted-foreground hover:text-destructive"
+        aria-label={`Delete ${node.name}`}
+        title="Delete"
+        onClick={() => onDelete(node)}
+      >
+        <Trash2 />
+      </Button>
+    </div>
   )
 }
 
@@ -274,7 +366,7 @@ function CategoryDialog({
             <DialogDescription>
               {isEdit
                 ? 'Rename, describe, or move this category.'
-                : 'Create a category. Leave parent empty for a top-level category.'}
+                : 'Create a category. Leave parent empty for a main category.'}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-4 py-4">
@@ -299,10 +391,10 @@ function CategoryDialog({
                 render={({ field }) => (
                   <Select value={field.value} onValueChange={field.onChange}>
                     <SelectTrigger id="cat-parent" className="w-full">
-                      <SelectValue placeholder="None (top level)" />
+                      <SelectValue placeholder="None (main category)" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">None (top level)</SelectItem>
+                      <SelectItem value="">None (main category)</SelectItem>
                       {flattenExcluding(
                         categories,
                         isEdit ? category!.id : null,
@@ -362,9 +454,7 @@ function MoveDialog({
     defaultValues: { parentId: node.parentId ?? '' },
   })
 
-  const validParents = flattenExcluding(categories, node.id).filter(
-    (c) => c.id !== node.id,
-  )
+  const validParents = flattenExcluding(categories, node.id)
 
   async function onSubmit(values: MoveCategoryValues) {
     await updateCategory.mutateAsync({
@@ -394,10 +484,10 @@ function MoveDialog({
               render={({ field }) => (
                 <Select value={field.value} onValueChange={field.onChange}>
                   <SelectTrigger id="move-parent" className="w-full">
-                    <SelectValue placeholder="None (top level)" />
+                    <SelectValue placeholder="None (main category)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">None (top level)</SelectItem>
+                    <SelectItem value="">None (main category)</SelectItem>
                     {validParents.map((c) => (
                       <SelectItem key={c.id} value={c.id}>
                         {c.label}
@@ -442,11 +532,12 @@ function DeleteDialog({
         <DialogHeader>
           <DialogTitle>Delete “{node.name}”?</DialogTitle>
           <DialogDescription>
-            This also deletes{' '}
             {subtreeCount > 1
-              ? `its ${subtreeCount - 1} subcategor${subtreeCount === 2 ? 'y' : 'ies'}`
-              : 'no subcategories'}{' '}
-            and uncategorizes any assigned expenses. This cannot be undone.
+              ? `Its ${subtreeCount - 1} subcategor${
+                  subtreeCount === 2 ? 'y' : 'ies'
+                } are deleted too.`
+              : 'This category will be removed.'}{' '}
+            This cannot be undone.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

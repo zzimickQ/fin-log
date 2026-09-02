@@ -39,6 +39,17 @@ export interface ExpenseUpdateInput {
 
 /** Expense persistence + aggregations. */
 export const expenseRepository = {
+  /**
+   * Raw per-category rows for one ledger, optionally within an occurredAt
+   * range (categoryId null = uncategorized). Shared by totals + breakdown.
+   */
+  categoryRows(
+    ledgerId: string,
+    range?: { from?: Date; to?: Date },
+  ) {
+    return fetchCategoryRows(ledgerId, range);
+  },
+
   /** Minimal row so the caller can resolve the ledger. */
   findById(expenseId: string) {
     return prisma.expense.findUnique({
@@ -47,7 +58,7 @@ export const expenseRepository = {
     });
   },
 
-  /** Totals per ledger for every ledger of a family (dashboard/family view). */
+  /** Totals for every ledger of a family (dashboard/family view). */
   async groupTotalsByLedger(familyId: string): Promise<Map<string, LedgerTotals>> {
     const rows = await prisma.expense.groupBy({
       by: ["ledgerId", "categoryId"],
@@ -58,14 +69,26 @@ export const expenseRepository = {
     return toTotalsMap(rows);
   },
 
-  /** Totals for a single ledger. */
-  async getLedgerTotals(ledgerId: string): Promise<LedgerTotals> {
+  /** Totals for every ledger across many families (navbar switcher). */
+  async groupTotalsForFamilies(
+    familyIds: string[],
+  ): Promise<Map<string, LedgerTotals>> {
+    if (familyIds.length === 0) return new Map();
     const rows = await prisma.expense.groupBy({
-      by: ["categoryId"],
-      where: { ledgerId },
+      by: ["ledgerId", "categoryId"],
+      where: { ledger: { familyId: { in: familyIds } } },
       _count: { _all: true },
       _sum: { amount: true },
     });
+    return toTotalsMap(rows);
+  },
+
+  /** Totals for a single ledger, optionally within an occurredAt range. */
+  async getLedgerTotals(
+    ledgerId: string,
+    range?: { from?: Date; to?: Date },
+  ): Promise<LedgerTotals> {
+    const rows = await fetchCategoryRows(ledgerId, range);
     let count = 0;
     let uncategorized = 0;
     let sum = 0;
@@ -111,6 +134,31 @@ export const expenseRepository = {
     return prisma.expense.delete({ where: { id: expenseId } });
   },
 
+  /** id + ledger + current category for batch categorization. */
+  findBulkMeta(expenseIds: string[]) {
+    return prisma.expense.findMany({
+      where: { id: { in: expenseIds } },
+      select: { id: true, ledgerId: true, categoryId: true },
+    });
+  },
+
+  /**
+   * Apply each category to its expense ids in one transaction. Returns the
+   * number of rows affected per group.
+   */
+  categorizeMany(
+    assignments: { categoryId: string; expenseIds: string[] }[],
+  ) {
+    return prisma.$transaction(
+      assignments.map((a) =>
+        prisma.expense.updateMany({
+          where: { id: { in: a.expenseIds } },
+          data: { categoryId: a.categoryId },
+        }),
+      ),
+    );
+  },
+
   /** Latest expenses across all families the user belongs to (dashboard). */
   findRecentForUser(userId: string, limit: number) {
     return prisma.expense.findMany({
@@ -141,6 +189,29 @@ type TotalsRow = {
   _count: { _all: number };
   _sum: { amount: unknown };
 };
+
+/** Raw per-category rows for one ledger (categoryId null = uncategorized). */
+function fetchCategoryRows(
+  ledgerId: string,
+  range?: { from?: Date; to?: Date },
+) {
+  return prisma.expense.groupBy({
+    by: ["categoryId"],
+    where: {
+      ledgerId,
+      ...(range?.from || range?.to
+        ? {
+            occurredAt: {
+              ...(range?.from ? { gte: range.from } : {}),
+              ...(range?.to ? { lte: range.to } : {}),
+            },
+          }
+        : {}),
+    },
+    _count: { _all: true },
+    _sum: { amount: true },
+  });
+}
 
 function toTotalsMap(rows: TotalsRow[]): Map<string, LedgerTotals> {
   const totals = new Map<string, LedgerTotals>();

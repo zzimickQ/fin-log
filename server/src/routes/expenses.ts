@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireSession } from "../lib/guards.js";
 import {
   categorizeExpense,
+  categorizeExpenses,
   createExpense,
   deleteExpense,
   listExpenses,
@@ -160,6 +161,35 @@ export async function expenseRoutes(app: FastifyInstance) {
         request.params.expenseId,
         request.body.categoryId,
       );
+    },
+  });
+
+  // ---------- categorize a batch of expenses at once ----------
+
+  routes.post("/api/expenses/categorize-batch", {
+    schema: {
+      summary: "Assign categories to several expenses in one transaction",
+      description:
+        "Body { items: [{ expenseId, categoryId }] }. Each category must belong to the family of the expense's ledger.",
+      tags: ["expenses"],
+      security: [{ sessionCookie: [] }],
+      body: z.object({
+        items: z
+          .array(z.object({ expenseId: z.string(), categoryId: z.string() }))
+          .min(1)
+          .max(200),
+      }),
+      response: {
+        200: z.object({ count: z.number() }),
+        400: errorSchema,
+        401: errorSchema,
+        403: errorSchema,
+        404: errorSchema,
+      },
+    },
+    handler: async (request) => {
+      const session = await requireSession(request);
+      return categorizeExpenses(session.user.id, request.body.items);
     },
   });
 

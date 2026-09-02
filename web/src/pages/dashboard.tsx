@@ -4,10 +4,8 @@ import { useForm } from 'react-hook-form'
 import {
   useCreateFamilyMutation,
   useFamiliesQuery,
-  useRecentExpensesQuery,
 } from '@/lib/queries'
 import { toast } from '@/lib/stores'
-import { formatDateTime, formatMoney } from '@/lib/format'
 import { familySchema, zodFormResolver, type FamilyValues } from '@/lib/validations'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -29,7 +27,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ChevronRight, Plus, Receipt, Users, Wallet } from 'lucide-react'
+import { ChevronRight, Plus, Users, Wallet } from 'lucide-react'
 
 const roleLabel: Record<string, string> = {
   OWNER: 'Owner',
@@ -40,7 +38,6 @@ const roleLabel: Record<string, string> = {
 export function DashboardPage() {
   const navigate = useNavigate()
   const families = useFamiliesQuery()
-  const recent = useRecentExpensesQuery(8)
   const createFamily = useCreateFamilyMutation()
 
   const [open, setOpen] = useState(false)
@@ -172,46 +169,6 @@ export function DashboardPage() {
           ))}
         </div>
       )}
-
-      <div className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Recent expenses</h2>
-        {recent.data && recent.data.expenses.length === 0 && (
-          <Card>
-            <CardContent className="py-8 text-center text-sm text-muted-foreground">
-              <Receipt className="mx-auto size-6" />
-              <p className="mt-2">
-                Nothing recorded yet. Open a ledger and add your first expense.
-              </p>
-            </CardContent>
-          </Card>
-        )}
-        {recent.data?.expenses.map((expense) => (
-          <Card key={expense.id} size="sm">
-            <CardContent className="flex flex-wrap items-center justify-between gap-2 py-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">
-                  {expense.description ?? 'Expense'}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {expense.ledger.family.name} · {expense.ledger.name} ·{' '}
-                  {formatDateTime(expense.occurredAt)}
-                  {expense.category ? ` · ${expense.category.name}` : ''}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                {expense.category === null && (
-                  <Badge variant="outline" className="text-amber-600 dark:text-amber-400">
-                    Uncategorized
-                  </Badge>
-                )}
-                <span className="font-semibold tabular-nums">
-                  {formatMoney(expense.amount, expense.currency)}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
     </div>
   )
 }

@@ -10,6 +10,14 @@ export const categoryRepository = {
     });
   },
 
+  /** Family resolution for many categories (bulk categorization). */
+  findByIds(ids: string[]) {
+    return prisma.expenseCategory.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, familyId: true },
+    });
+  },
+
   /** All categories of a family (flat, ordered) with direct expense counts. */
   findByFamily(familyId: string) {
     return prisma.expenseCategory.findMany({

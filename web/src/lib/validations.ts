@@ -57,6 +57,35 @@ export const signUpSchema = z.object({
 })
 export type SignUpValues = z.infer<typeof signUpSchema>
 
+// ---------- profile / password ----------
+
+export const profileSchema = z.object({
+  name: z.string({ message: 'Enter your name' }).trim().min(1, 'Name is required').max(100),
+})
+export type ProfileValues = z.infer<typeof profileSchema>
+
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z
+      .string({ message: 'Enter your current password' })
+      .min(1, 'Enter your current password'),
+    newPassword: z
+      .string({ message: 'Choose a new password' })
+      .min(8, 'New password must be at least 8 characters')
+      .max(128),
+    confirmPassword: z.string({ message: 'Repeat the new password' }),
+    revokeOtherSessions: z.boolean(),
+  })
+  .refine((v) => v.newPassword === v.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  })
+  .refine((v) => v.newPassword !== v.currentPassword, {
+    message: 'New password must be different from the current one',
+    path: ['newPassword'],
+  })
+export type ChangePasswordValues = z.infer<typeof changePasswordSchema>
+
 // ---------- family / ledger ----------
 
 export const familySchema = z.object({

@@ -1,5 +1,6 @@
 import { ledgerRepository } from "./ledger.repository.js";
 import { expenseRepository } from "../expense/expense.repository.js";
+import { familyRepository } from "../family/family.repository.js";
 import {
   requireFamilyMembership,
   requireFamilyRole,
@@ -7,6 +8,39 @@ import {
 } from "../../lib/guards.js";
 
 /** Ledger usecases. */
+
+/**
+ * Every ledger the user belongs to across all their families, with the
+ * owning family attached — powers the navbar ledger switcher.
+ */
+export async function listMyLedgers(userId: string) {
+  const memberships = await familyRepository.findMembershipsByUser(userId);
+  const familyIds = memberships.map((m) => m.familyId);
+  if (familyIds.length === 0) return { ledgers: [] };
+
+  const familyNameById = new Map(
+    memberships.map((m) => [m.familyId, m.family.name]),
+  );
+  const [ledgers, totals] = await Promise.all([
+    ledgerRepository.findByFamilies(familyIds),
+    expenseRepository.groupTotalsForFamilies(familyIds),
+  ]);
+
+  return {
+    ledgers: ledgers.map((l) => {
+      const t = totals.get(l.id) ?? { count: 0, uncategorized: 0, sum: 0 };
+      return {
+        id: l.id,
+        name: l.name,
+        description: l.description,
+        familyId: l.familyId,
+        familyName: familyNameById.get(l.familyId) ?? "",
+        expenseCount: t.count,
+        uncategorizedCount: t.uncategorized,
+      };
+    }),
+  };
+}
 
 export async function listLedgers(userId: string, familyId: string) {
   await requireFamilyMembership(userId, familyId);
