@@ -24,6 +24,10 @@ export const registerUploads = fp(async function registerUploads(
     wildcard: true,
     maxAge: "1y",
     immutable: true,
+    // The web-dist static plugin (when enabled) adds the `sendFile` reply
+    // decorator — registering it here too would throw
+    // FST_ERR_DEC_ALREADY_PRESENT when both are active.
+    decorateReply: false,
     setHeaders(reply, filePath) {
       if (filePath.endsWith(".png")) {
         reply.header("Content-Type", "image/png");
