@@ -4,11 +4,14 @@ import { useActiveLedgerRow } from '@/lib/active-ledger'
 import {
   useDeleteExpenseMutation,
   useFamilyQuery,
-  useLedgerExpensesInRangeQuery,
+  useLedgerAnalyticsCategoriesQuery,
+  useLedgerAnalyticsDaysQuery,
+  useLedgerExpenseRowsQuery,
+  useLedgerTotalsQuery,
   useUpdateExpenseMutation,
+  type ExpenseRowsFilter,
 } from '@/lib/queries'
 import { formatMoney } from '@/lib/format'
-import { flattenCategories } from '@/lib/category-helpers'
 import { toast } from '@/lib/stores'
 import type {
   CategoryNode,
@@ -17,8 +20,8 @@ import type {
   MyLedger,
 } from '@/lib/types'
 import { Button } from '@/components/ui/button'
-import { ExpenseListItem } from '@/components/expense-list-item'
 import { Card, CardContent } from '@/components/ui/card'
+import { ExpenseListItem } from '@/components/expense-list-item'
 import {
   Dialog,
   DialogContent,
@@ -75,11 +78,6 @@ type Drill =
   | { kind: 'date'; dateKey: string }
   | { kind: 'uncategorized' }
 
-interface CategoryTree {
-  byId: Map<string, CategoryNode>
-  roots: CategoryNode[]
-}
-
 interface GroupRowModel {
   key: string
   label: string
@@ -91,9 +89,10 @@ interface GroupRowModel {
   onOpen: () => void
 }
 
-type View =
-  | { kind: 'groups'; rows: GroupRowModel[] }
-  | { kind: 'expenses'; rows: Expense[] }
+interface CatRef {
+  name: string
+  parentId: string | null
+}
 
 const PRESETS: { id: Exclude<PresetId, 'month'>; label: string }[] = [
   { id: 'this-week', label: 'This week' },
@@ -117,7 +116,7 @@ const SORTS: { id: SortId; label: string }[] = [
   { id: 'lowest', label: 'Amount · low → high' },
 ]
 
-// ---------- entry point ----------
+// ---------- page ----------
 
 export function AnalyticsPage() {
   const { ledger, isPending } = useActiveLedgerRow()
@@ -145,6 +144,7 @@ export function AnalyticsPage() {
 function AnalyticsFlow({ ledger }: { ledger: MyLedger }) {
   const { data: family } = useFamilyQuery(ledger.familyId)
   const roots = useMemo(() => family?.categories ?? [], [family])
+  const members = useMemo(() => family?.members ?? [], [family])
 
   // ---- options state ----
   const now = useMemo(() => new Date(), [])
@@ -159,9 +159,7 @@ function AnalyticsFlow({ ledger }: { ledger: MyLedger }) {
     () => resolveRange(preset, now, monthVal, customFrom, customTo),
     [preset, now, monthVal, customFrom, customTo],
   )
-
-  const { data: expenses, isPending, isError } =
-    useLedgerExpensesInRangeQuery(ledger.id, range.from, range.to)
+  const tzOffset = useMemo(() => -new Date().getTimezoneOffset(), [])
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
@@ -172,7 +170,6 @@ function AnalyticsFlow({ ledger }: { ledger: MyLedger }) {
         </p>
       </div>
 
-      {/* One dropdown per option. */}
       <div className="flex flex-wrap items-center gap-1.5">
         <RangePicker
           label={range.label}
@@ -192,31 +189,23 @@ function AnalyticsFlow({ ledger }: { ledger: MyLedger }) {
         <SortingPicker sortId={sortId} onSort={setSortId} />
       </div>
 
-      {isError && (
-        <p className="text-sm text-destructive">
-          Failed to load expenses — try again.
-        </p>
-      )}
-
-      {isPending ? (
-        <LoadingList />
-      ) : (
-        <Results
-          key={`${grouping}:${range.from}:${range.to}`}
-          ledgerId={ledger.id}
-          familyId={ledger.familyId}
-          roots={roots}
-          members={family?.members ?? []}
-          expenses={expenses ?? []}
-          grouping={grouping}
-          sortId={sortId}
-        />
-      )}
+      <Results
+        key={`${grouping}:${range.from}:${range.to}`}
+        ledgerId={ledger.id}
+        familyId={ledger.familyId}
+        roots={roots}
+        members={members}
+        from={range.from}
+        to={range.to}
+        tzOffset={tzOffset}
+        grouping={grouping}
+        sortId={sortId}
+      />
     </div>
   )
 }
 
-// ---------- per-option dropdown pickers ----------
+// ---------- pickers ----------
 
 function PickerPill(
   {
@@ -261,7 +250,65 @@ function PopoverTitle({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** Range dropdown: presets + month picker + custom dates. */
+function OptionList({
+  options,
+  selected,
+  onSelect,
+}: {
+  options: { id: string; label: string }[]
+  selected: string
+  onSelect: (id: string) => void
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      {options.map((o) => {
+        const active = o.id === selected
+        return (
+          <button
+            key={o.id}
+            type="button"
+            onClick={() => onSelect(o.id)}
+            className={cn(
+              'flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-sm text-left transition-colors',
+              active
+                ? 'bg-primary/10 font-medium text-primary'
+                : 'text-foreground hover:bg-muted',
+            )}
+          >
+            {o.label}
+            {active && <Check className="size-4 shrink-0" />}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function ChoiceChip({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean
+  children: React.ReactNode
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded-full border px-2.5 py-1.5 text-sm transition-colors',
+        active
+          ? 'border-primary bg-primary text-primary-foreground'
+          : 'border-input bg-background hover:bg-muted',
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
 function RangePicker({
   label,
   preset,
@@ -341,7 +388,6 @@ function RangePicker({
   )
 }
 
-/** Grouping dropdown. */
 function GroupingPicker({
   grouping,
   onGrouping,
@@ -372,7 +418,6 @@ function GroupingPicker({
   )
 }
 
-/** Sorting dropdown. */
 function SortingPicker({
   sortId,
   onSort,
@@ -403,67 +448,6 @@ function SortingPicker({
   )
 }
 
-/** Generic list of selectable options with a checkmark. */
-function OptionList({
-  options,
-  selected,
-  onSelect,
-}: {
-  options: { id: string; label: string }[]
-  selected: string
-  onSelect: (id: string) => void
-}) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      {options.map((o) => {
-        const active = o.id === selected
-        return (
-          <button
-            key={o.id}
-            type="button"
-            onClick={() => onSelect(o.id)}
-            className={cn(
-              'flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-sm text-left transition-colors',
-              active
-                ? 'bg-primary/10 font-medium text-primary'
-                : 'text-foreground hover:bg-muted',
-            )}
-          >
-            {o.label}
-            {active && <Check className="size-4 shrink-0" />}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-function ChoiceChip({
-  active,
-  children,
-  onClick,
-}: {
-  active: boolean
-  children: React.ReactNode
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'rounded-full border px-2.5 py-1.5 text-sm transition-colors',
-        active
-          ? 'border-primary bg-primary text-primary-foreground'
-          : 'border-input bg-background hover:bg-muted',
-      )}
-    >
-      {children}
-    </button>
-  )
-}
-
-// ---------- results ----------
 // ---------- results ----------
 
 function Results({
@@ -471,7 +455,9 @@ function Results({
   familyId,
   roots,
   members,
-  expenses,
+  from,
+  to,
+  tzOffset,
   grouping,
   sortId,
 }: {
@@ -479,106 +465,86 @@ function Results({
   familyId: string
   roots: CategoryNode[]
   members: FamilyMember[]
-  expenses: Expense[]
+  from: string
+  to: string
+  tzOffset: number
   grouping: Grouping
   sortId: SortId
 }) {
   const [drill, setDrill] = useState<Drill>({ kind: 'root' })
   const [editing, setEditing] = useState<Expense | null>(null)
-  const tree = useMemo(() => buildTree(roots), [roots])
-  const categoryOptions = useMemo(() => flattenCategories(roots), [roots])
-
-  const view = useMemo(
-    () => buildView({ tree, expenses, grouping, sortId, drill, onDrill: setDrill }),
-    [tree, expenses, grouping, sortId, drill],
-  )
-
-  const total = useMemo(
-    () => expenses.reduce((acc, e) => acc + e.amount, 0),
-    [expenses],
-  )
-
-  if (expenses.length === 0) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
-          <Receipt className="size-8 text-muted-foreground" />
-          <p className="text-sm font-medium">No expenses in this range</p>
-          <p className="text-sm text-muted-foreground">
-            Open the options to change the range.
-          </p>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  const maxGroupSum =
-    view.kind === 'groups'
-      ? view.rows.reduce((m, r) => Math.max(m, r.sum), 0)
-      : 0
-  // A date column is redundant when browsing one day's expenses.
-  const dateNotObvious = !(grouping === 'date' && drill.kind === 'date')
-
-  function openEditor(id: string) {
-    const expense = expenses.find((e) => e.id === id)
-    if (expense) setEditing(expense)
-  }
+  const catRefs = useMemo(() => buildCatRefs(roots), [roots])
+  const categoryOptions = useMemo(() => flattenOptions(roots), [roots])
+  const totals = useLedgerTotalsQuery(ledgerId, from, to)
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Hero summary */}
       <div className="flex items-end justify-between gap-3 rounded-xl bg-card px-4 py-4 ring-1 ring-foreground/10">
         <div>
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
             Total spent
           </p>
-          <p className="mt-0.5 text-3xl font-bold tracking-tight tabular-nums">
-            {formatMoney(total)}
-          </p>
+          {totals.isPending ? (
+            <div className="mt-1 h-9 w-40 animate-pulse rounded-md bg-muted" />
+          ) : (
+            <p className="mt-0.5 text-3xl font-bold tracking-tight tabular-nums">
+              {formatMoney(totals.data?.sum ?? 0)}
+            </p>
+          )}
           <p className="text-xs text-muted-foreground">
-            {expenses.length} expense{expenses.length === 1 ? '' : 's'}
+            {totals.data?.count ?? 0} expense
+            {totals.data?.count === 1 ? '' : 's'}
           </p>
         </div>
-        <div className="flex flex-col items-end gap-1 text-right">
-          <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-            {groupLabel(grouping)}
-          </span>
-        </div>
+        <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+          {GROUPINGS.find((g) => g.id === grouping)?.label}
+        </span>
       </div>
 
       {drill.kind !== 'root' && (
-        <Breadcrumbs drill={drill} tree={tree} onDrill={setDrill} />
+        <Crumbs drill={drill} catRefs={catRefs} onDrill={setDrill} />
       )}
 
-      <Card>
-        <CardContent className="flex flex-col py-1">
-          {view.kind === 'groups' && view.rows.length === 0 && (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              Nothing in this view.
-            </p>
-          )}
-          {view.kind === 'groups' &&
-            view.rows.map((row) => (
-              <GroupRow key={row.key} row={row} maxSum={maxGroupSum} />
-            ))}
-          {view.kind === 'expenses' && view.rows.length === 0 && (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              Nothing here.
-            </p>
-          )}
-          {view.kind === 'expenses' &&
-            view.rows.map((expense) => (
-              <ExpenseListItem
-                key={expense.id}
-                expense={expense}
-                members={members}
-                categoryLabelFor={(id) => categoryPath(tree, id)}
-                withDate={dateNotObvious}
-                onEdit={() => openEditor(expense.id)}
-              />
-            ))}
-        </CardContent>
-      </Card>
+      {grouping === 'category' && (
+        <CategoryBody
+          ledgerId={ledgerId}
+          familyId={familyId}
+          catRefs={catRefs}
+          members={members}
+          from={from}
+          to={to}
+          sortId={sortId}
+          drill={drill}
+          onDrill={setDrill}
+          onEdit={setEditing}
+        />
+      )}
+      {grouping === 'date' && (
+        <DateBody
+          ledgerId={ledgerId}
+          familyId={familyId}
+          catRefs={catRefs}
+          members={members}
+          from={from}
+          to={to}
+          tzOffset={tzOffset}
+          sortId={sortId}
+          drill={drill}
+          onDrill={setDrill}
+          onEdit={setEditing}
+        />
+      )}
+      {grouping === 'list' && (
+        <ExpenseListBody
+          ledgerId={ledgerId}
+          familyId={familyId}
+          catRefs={catRefs}
+          members={members}
+          filter={{ from, to, sort: sortId }}
+          withDate
+          onEdit={setEditing}
+        />
+      )}
 
       {editing && (
         <ExpenseEditorDialog
@@ -593,11 +559,196 @@ function Results({
   )
 }
 
-function groupLabel(grouping: Grouping) {
-  return GROUPINGS.find((g) => g.id === grouping)?.label ?? ''
+// ---------- category drill (aggregated server-side per level) ----------
+
+function CategoryBody({
+  ledgerId,
+  familyId,
+  catRefs,
+  members,
+  from,
+  to,
+  sortId,
+  drill,
+  onDrill,
+  onEdit,
+}: {
+  ledgerId: string
+  familyId: string
+  catRefs: Map<string, CatRef>
+  members: FamilyMember[]
+  from: string
+  to: string
+  sortId: SortId
+  drill: Drill
+  onDrill: (d: Drill) => void
+  onEdit: (e: Expense) => void
+}) {
+  const pathBase = drill.kind === 'cat' ? drill.path : []
+  const parentId = pathBase.length ? pathBase[pathBase.length - 1] : null
+  const level = useLedgerAnalyticsCategoriesQuery(ledgerId, from, to, parentId)
+
+  if (drill.kind === 'cat-expenses') {
+    return (
+      <ExpenseListBody
+        ledgerId={ledgerId}
+        familyId={familyId}
+        catRefs={catRefs}
+        members={members}
+        filter={{ from, to, categoryId: drill.catId, sort: sortId }}
+        withDate
+        onEdit={onEdit}
+      />
+    )
+  }
+  if (drill.kind === 'uncategorized') {
+    return (
+      <ExpenseListBody
+        ledgerId={ledgerId}
+        familyId={familyId}
+        catRefs={catRefs}
+        members={members}
+        filter={{ from, to, uncategorized: true, sort: sortId }}
+        withDate
+        onEdit={onEdit}
+      />
+    )
+  }
+
+  if (drill.kind !== 'root' && drill.kind !== 'cat') return null
+
+  if (level.isPending) {
+    return <RowsSkeleton />
+  }
+  if (!level.data) return null
+
+  const rows: GroupRowModel[] = level.data.children.map((c) => {
+    const path = parentId ? [...pathBase, c.id] : [c.id]
+    return {
+      key: `cat-${c.id}`,
+      label: c.name,
+      count: c.count,
+      sum: c.sum,
+      onOpen: () =>
+        c.hasChildren
+          ? onDrill({ kind: 'cat', path })
+          : onDrill({ kind: 'cat-expenses', path, catId: c.id }),
+    }
+  })
+
+  if (parentId && level.data.direct.count > 0) {
+    const scopeName = catRefs.get(parentId)?.name ?? '…'
+    rows.push({
+      key: `cat-${parentId}-direct`,
+      label: 'Expenses',
+      note: `directly in ${scopeName}`,
+      count: level.data.direct.count,
+      sum: level.data.direct.sum,
+      onOpen: () =>
+        onDrill({
+          kind: 'cat-expenses',
+          path: [...pathBase],
+          catId: parentId,
+        }),
+    })
+  }
+  if (!parentId && level.data.uncategorized.count > 0) {
+    rows.push({
+      key: 'cat-uncategorized',
+      label: 'Uncategorized',
+      count: level.data.uncategorized.count,
+      sum: level.data.uncategorized.sum,
+      uncategorized: true,
+      onOpen: () => onDrill({ kind: 'uncategorized' }),
+    })
+  }
+
+  return <GroupList rows={sortGroupRows(rows, sortId)} />
 }
 
-// ---------- row components ----------
+// ---------- date drill (per-day buckets aggregated in the DB) ----------
+
+function DateBody({
+  ledgerId,
+  familyId,
+  catRefs,
+  members,
+  from,
+  to,
+  tzOffset,
+  sortId,
+  drill,
+  onDrill,
+  onEdit,
+}: {
+  ledgerId: string
+  familyId: string
+  catRefs: Map<string, CatRef>
+  members: FamilyMember[]
+  from: string
+  to: string
+  tzOffset: number
+  sortId: SortId
+  drill: Drill
+  onDrill: (d: Drill) => void
+  onEdit: (e: Expense) => void
+}) {
+  const days = useLedgerAnalyticsDaysQuery(ledgerId, from, to, tzOffset)
+
+  if (drill.kind === 'date') {
+    const day = parseDay(drill.dateKey)
+    return (
+      <ExpenseListBody
+        ledgerId={ledgerId}
+        familyId={familyId}
+        catRefs={catRefs}
+        members={members}
+        filter={{
+          from: dayStart(day).toISOString(),
+          to: dayEnd(day).toISOString(),
+          sort: sortId,
+        }}
+        withDate={false} // the day is obvious here
+        onEdit={onEdit}
+      />
+    )
+  }
+
+  if (days.isPending) {
+    return <RowsSkeleton />
+  }
+
+  const rows: GroupRowModel[] = (days.data?.days ?? []).map((d) => ({
+    key: `day-${d.date}`,
+    label: dayLabel(d.date),
+    sortDate: d.date,
+    count: d.count,
+    sum: d.sum,
+    onOpen: () => onDrill({ kind: 'date', dateKey: d.date }),
+  }))
+
+  return <GroupList rows={sortGroupRows(rows, sortId)} />
+}
+
+// ---------- shared list rendering ----------
+
+function GroupList({ rows }: { rows: GroupRowModel[] }) {
+  const maxSum = rows.reduce((m, r) => Math.max(m, r.sum), 0)
+  return (
+    <Card>
+      <CardContent className="flex flex-col py-1">
+        {rows.length === 0 && (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            Nothing in this view.
+          </p>
+        )}
+        {rows.map((row) => (
+          <GroupRow key={row.key} row={row} maxSum={maxSum} />
+        ))}
+      </CardContent>
+    </Card>
+  )
+}
 
 function GroupRow({ row, maxSum }: { row: GroupRowModel; maxSum: number }) {
   const share = maxSum > 0 ? Math.round((row.sum / maxSum) * 100) : 0
@@ -610,21 +761,17 @@ function GroupRow({ row, maxSum }: { row: GroupRowModel; maxSum: number }) {
       <span className="min-w-0 flex-1">
         <span
           className={cn(
-            'flex items-center gap-2 text-[0.95rem] font-medium',
+            'block text-[0.95rem] font-medium',
             row.uncategorized && 'text-amber-600 dark:text-amber-400',
           )}
         >
-          <span className="truncate">{row.label}</span>
+          {row.label}
         </span>
         <span className="mt-0.5 block text-xs text-muted-foreground">
           {row.count} expense{row.count === 1 ? '' : 's'}
           {row.note ? ` · ${row.note}` : ''}
         </span>
-        <span
-          className={cn(
-            'mt-2 block h-1 w-full overflow-hidden rounded-full bg-muted',
-          )}
-        >
+        <span className="mt-2 block h-1 w-full overflow-hidden rounded-full bg-muted">
           <span
             className={cn(
               'block h-full rounded-full',
@@ -644,7 +791,132 @@ function GroupRow({ row, maxSum }: { row: GroupRowModel; maxSum: number }) {
   )
 }
 
-// ---------- edit an expense ----------
+/** A leaf expense list for a specific server scope (rows only here). */
+function ExpenseListBody({
+  ledgerId,
+  familyId,
+  catRefs,
+  members,
+  filter,
+  withDate,
+  onEdit,
+}: {
+  ledgerId: string
+  familyId: string
+  catRefs: Map<string, CatRef>
+  members: FamilyMember[]
+  filter: ExpenseRowsFilter
+  withDate: boolean
+  onEdit: (e: Expense) => void
+}) {
+  void familyId
+  const rows = useLedgerExpenseRowsQuery(ledgerId, filter)
+
+  if (rows.isPending) {
+    return <RowsSkeleton />
+  }
+
+  const expenses = rows.data ?? []
+  if (expenses.length === 0) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
+          <Receipt className="size-8 text-muted-foreground" />
+          <p className="text-sm font-medium">No expenses here</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col py-1">
+        {expenses.map((expense) => (
+          <ExpenseListItem
+            key={expense.id}
+            expense={expense}
+            members={members}
+            categoryLabelFor={(id) => categoryPathOf(catRefs, id)}
+            withDate={withDate}
+            onEdit={() => onEdit(expense)}
+          />
+        ))}
+      </CardContent>
+    </Card>
+  )
+}
+
+function RowsSkeleton() {
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-3 py-4">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="h-10 animate-pulse rounded-md bg-muted" />
+        ))}
+      </CardContent>
+    </Card>
+  )
+}
+
+function Crumbs({
+  drill,
+  catRefs,
+  onDrill,
+}: {
+  drill: Drill
+  catRefs: Map<string, CatRef>
+  onDrill: (d: Drill) => void
+}) {
+  const crumbs: { label: string; onClick?: () => void }[] = []
+  const nameOf = (id: string) => catRefs.get(id)?.name ?? '…'
+
+  if (drill.kind === 'cat' || drill.kind === 'cat-expenses') {
+    drill.path.forEach((id, i) => {
+      crumbs.push({
+        label: nameOf(id),
+        onClick:
+          i < drill.path.length - 1
+            ? () => onDrill({ kind: 'cat', path: drill.path.slice(0, i + 1) })
+            : undefined,
+      })
+    })
+    if (drill.kind === 'cat-expenses') crumbs.push({ label: 'Expenses' })
+  } else if (drill.kind === 'date') {
+    crumbs.push({ label: dayLabel(drill.dateKey) })
+  } else if (drill.kind === 'uncategorized') {
+    crumbs.push({ label: 'Uncategorized' })
+  }
+
+  return (
+    <nav className="flex flex-wrap items-center gap-1 text-sm">
+      <button
+        type="button"
+        onClick={() => onDrill({ kind: 'root' })}
+        className="font-medium text-foreground underline-offset-2 hover:underline"
+      >
+        All
+      </button>
+      {crumbs.map((c, i) => (
+        <span key={`${c.label}-${i}`} className="flex items-center gap-1">
+          <ChevronRight className="size-3.5 text-muted-foreground" />
+          {c.onClick ? (
+            <button
+              type="button"
+              onClick={c.onClick}
+              className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              {c.label}
+            </button>
+          ) : (
+            <span className="text-muted-foreground">{c.label}</span>
+          )}
+        </span>
+      ))}
+    </nav>
+  )
+}
+
+// ---------- edit / delete expense ----------
 
 function ExpenseEditorDialog({
   expense,
@@ -662,12 +934,8 @@ function ExpenseEditorDialog({
   const updateExpense = useUpdateExpenseMutation()
   const deleteExpense = useDeleteExpenseMutation()
   const [amount, setAmount] = useState(String(expense.amount))
-  const [description, setDescription] = useState(
-    expense.description ?? '',
-  )
-  const [categoryId, setCategoryId] = useState(
-    expense.category?.id ?? '',
-  )
+  const [description, setDescription] = useState(expense.description ?? '')
+  const [categoryId, setCategoryId] = useState(expense.category?.id ?? '')
   const [error, setError] = useState<string | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
@@ -703,7 +971,11 @@ function ExpenseEditorDialog({
 
   async function remove() {
     try {
-      await deleteExpense.mutateAsync({ expenseId: expense.id, ledgerId, familyId })
+      await deleteExpense.mutateAsync({
+        expenseId: expense.id,
+        ledgerId,
+        familyId,
+      })
       toast.success('Expense deleted')
       onClose()
     } catch {
@@ -728,7 +1000,7 @@ function ExpenseEditorDialog({
               id="edit-amount"
               inputMode="decimal"
               value={amount}
-              onChange={(e) => setAmount(sanitizeAmountInput(e.target.value))}
+              onChange={(e) => setAmount(sanitizeAmount(e.target.value))}
               aria-invalid={error ? true : undefined}
             />
             {error && <p className="text-sm text-destructive">{error}</p>}
@@ -739,7 +1011,6 @@ function ExpenseEditorDialog({
             <Input
               id="edit-description"
               maxLength={200}
-              placeholder="Groceries, taxi fare, coffee…"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
@@ -821,7 +1092,7 @@ function ExpenseEditorDialog({
 }
 
 /** Keep only characters that make sense for an amount. */
-function sanitizeAmountInput(raw: string) {
+function sanitizeAmount(raw: string) {
   const cleaned = raw.replace(/[^\d.]/g, '')
   const [int, ...rest] = cleaned.split('.')
   const intTrimmed = int.slice(0, 12)
@@ -830,269 +1101,44 @@ function sanitizeAmountInput(raw: string) {
   return `${intTrimmed}.${rest.join('').slice(0, 2)}`
 }
 
-function Breadcrumbs({
-  drill,
-  tree,
-  onDrill,
-}: {
-  drill: Drill
-  tree: CategoryTree
-  onDrill: (d: Drill) => void
-}) {
-  const crumbs: { label: string; onClick?: () => void }[] = []
-  const nameOf = (id: string) => tree.byId.get(id)?.name ?? '…'
+// ---------- helpers ----------
 
-  if (drill.kind === 'cat' || drill.kind === 'cat-expenses') {
-    drill.path.forEach((id, i) => {
-      crumbs.push({
-        label: nameOf(id),
-        onClick:
-          i < drill.path.length - 1
-            ? () =>
-                onDrill({ kind: 'cat', path: drill.path.slice(0, i + 1) })
-            : undefined,
-      })
-    })
-    if (drill.kind === 'cat-expenses') crumbs.push({ label: 'Expenses' })
-  } else if (drill.kind === 'date') {
-    crumbs.push({ label: dayLabel(drill.dateKey) })
-  } else if (drill.kind === 'uncategorized') {
-    crumbs.push({ label: 'Uncategorized' })
+function buildCatRefs(roots: CategoryNode[]): Map<string, CatRef> {
+  const map = new Map<string, CatRef>()
+  const walk = (nodes: CategoryNode[], parentId: string | null) => {
+    for (const n of nodes) {
+      map.set(n.id, { name: n.name, parentId })
+      walk(n.children, n.id)
+    }
   }
-
-  return (
-    <nav className="flex flex-wrap items-center gap-1 text-sm">
-      <button
-        type="button"
-        onClick={() => onDrill({ kind: 'root' })}
-        className="font-medium text-foreground underline-offset-2 hover:underline"
-      >
-        All
-      </button>
-      {crumbs.map((c, i) => (
-        <span key={`${c.label}-${i}`} className="flex items-center gap-1">
-          <ChevronRight className="size-3.5 text-muted-foreground" />
-          {c.onClick ? (
-            <button
-              type="button"
-              onClick={c.onClick}
-              className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-            >
-              {c.label}
-            </button>
-          ) : (
-            <span className="text-muted-foreground">{c.label}</span>
-          )}
-        </span>
-      ))}
-    </nav>
-  )
+  walk(roots, null)
+  return map
 }
 
-function LoadingList() {
-  return (
-    <Card>
-      <CardContent className="flex flex-col gap-3 py-4">
-        {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />
-        ))}
-      </CardContent>
-    </Card>
-  )
+function flattenOptions(
+  roots: CategoryNode[],
+): { id: string; name: string; depth: number }[] {
+  const out: { id: string; name: string; depth: number }[] = []
+  const walk = (nodes: CategoryNode[], depth: number) => {
+    for (const n of nodes) {
+      out.push({ id: n.id, name: n.name, depth })
+      walk(n.children, depth + 1)
+    }
+  }
+  walk(roots, 0)
+  return out
 }
 
-// ---------- view building (unchanged logic) ----------
-
-function buildTree(roots: CategoryNode[]): CategoryTree {
-  const byId = new Map<string, CategoryNode>()
-  const walk = (list: CategoryNode[]) => {
-    for (const n of list) {
-      byId.set(n.id, n)
-      walk(n.children)
-    }
-  }
-  walk(roots)
-  return { byId, roots }
-}
-
-function buildView({
-  tree,
-  expenses,
-  grouping,
-  sortId,
-  drill,
-  onDrill,
-}: {
-  tree: CategoryTree
-  expenses: Expense[]
-  grouping: Grouping
-  sortId: SortId
-  drill: Drill
-  onDrill: (d: Drill) => void
-}): View {
-  if (grouping === 'list') {
-    return {
-      kind: 'expenses',
-      rows: expenses
-        .sort((a, b) => compareExpenses(a, b, sortId)),
-    }
-  }
-
-  if (grouping === 'date') {
-    if (drill.kind === 'date') {
-      return {
-        kind: 'expenses',
-        rows: expenses
-          .filter((e) => localDayKey(e.occurredAt) === drill.dateKey)
-            .sort((a, b) => compareExpenses(a, b, sortId)),
-      }
-    }
-    const byDay = new Map<string, { count: number; sum: number }>()
-    for (const e of expenses) {
-      const key = localDayKey(e.occurredAt)
-      const g = byDay.get(key) ?? { count: 0, sum: 0 }
-      g.count += 1
-      g.sum += e.amount
-      byDay.set(key, g)
-    }
-    const rows: GroupRowModel[] = [...byDay.entries()].map(([key, g]) => ({
-      key: `day-${key}`,
-      label: dayLabel(key),
-      sortDate: key,
-      count: g.count,
-      sum: g.sum,
-      onOpen: () => onDrill({ kind: 'date', dateKey: key }),
-    }))
-    return { kind: 'groups', rows: sortGroupRows(rows, sortId) }
-  }
-
-  // grouping === 'category'
-  if (drill.kind === 'cat-expenses') {
-    return {
-      kind: 'expenses',
-      rows: expenses
-        .filter((e) => e.category?.id === drill.catId)
-        .sort((a, b) => compareExpenses(a, b, sortId)),
-    }
-  }
-  if (drill.kind === 'uncategorized') {
-    return {
-      kind: 'expenses',
-      rows: expenses
-        .filter((e) => e.category === null)
-        .sort((a, b) => compareExpenses(a, b, sortId)),
-    }
-  }
-
-  let rows: GroupRowModel[]
-
-  if (drill.kind === 'root') {
-    rows = tree.roots
-      .map((root) => {
-        const g = aggregateUnder(expenses, tree, root.id)
-        return {
-          key: `cat-${root.id}`,
-          label: root.name,
-          count: g.count,
-          sum: g.sum,
-          onOpen: () => openCategoryDrill(root, drill, onDrill),
-        } as GroupRowModel
-      })
-      .filter((r) => r.count > 0)
-
-    const uncat = sumOf(expenses.filter((e) => e.category === null))
-    if (uncat.count > 0) {
-      rows.push({
-        key: 'cat-uncategorized',
-        label: 'Uncategorized',
-        count: uncat.count,
-        sum: uncat.sum,
-        uncategorized: true,
-        onOpen: () => onDrill({ kind: 'uncategorized' }),
-      })
-    }
-    return { kind: 'groups', rows: sortGroupRows(rows, sortId) }
-  }
-
-  if (drill.kind !== 'cat') return { kind: 'groups', rows: [] }
-  const current = tree.byId.get(drill.path[drill.path.length - 1])
-  if (!current) return { kind: 'groups', rows: [] }
-
-  rows = current.children
-    .map((child) => {
-      const g = aggregateUnder(expenses, tree, child.id)
-      return {
-        key: `cat-${child.id}`,
-        label: child.name,
-        count: g.count,
-        sum: g.sum,
-        onOpen: () => openCategoryDrill(child, drill, onDrill),
-      } as GroupRowModel
-    })
-    .filter((r) => r.count > 0)
-
-  const direct = sumOf(expenses.filter((e) => e.category?.id === current.id))
-  if (direct.count > 0) {
-    rows.push({
-      key: `cat-${current.id}-direct`,
-      label: 'Expenses',
-      note: `directly in ${current.name}`,
-      count: direct.count,
-      sum: direct.sum,
-      onOpen: () =>
-        onDrill({
-          kind: 'cat-expenses',
-          path: [...drill.path],
-          catId: current.id,
-        }),
-    })
-  }
-  return { kind: 'groups', rows: sortGroupRows(rows, sortId) }
-}
-
-/** Open a category: its children groups, or its expenses directly. */
-function openCategoryDrill(
-  node: CategoryNode,
-  drill: Drill,
-  onDrill: (d: Drill) => void,
-) {
-  const path =
-    drill.kind === 'cat' ? [...drill.path, node.id] : [node.id]
-  if (node.children.length > 0) {
-    onDrill({ kind: 'cat', path })
-  } else {
-    onDrill({ kind: 'cat-expenses', path, catId: node.id })
-  }
-}
-
-// ---------- aggregations & ordering ----------
-
-function aggregateUnder(
-  expenses: Expense[],
-  tree: CategoryTree,
-  categoryId: string,
-) {
-  return sumOf(
-    expenses.filter(
-      (e) => e.category && isUnder(tree, e.category.id, categoryId),
-    ),
-  )
-}
-
-function isUnder(tree: CategoryTree, categoryId: string, ancestorId: string) {
-  let cur: string | null = categoryId
+function categoryPathOf(catRefs: Map<string, CatRef>, id: string) {
+  const parts: string[] = []
+  let cur: string | null = id
   while (cur) {
-    if (cur === ancestorId) return true
-    cur = tree.byId.get(cur)?.parentId ?? null
+    const ref = catRefs.get(cur)
+    if (!ref) break
+    parts.unshift(ref.name)
+    cur = ref.parentId
   }
-  return false
-}
-
-function sumOf(rows: Expense[]) {
-  return rows.reduce(
-    (acc, e) => ({ count: acc.count + 1, sum: acc.sum + e.amount }),
-    { count: 0, sum: 0 },
-  )
+  return parts.join(' › ') || 'Category'
 }
 
 function sortGroupRows(rows: GroupRowModel[], sortId: SortId): GroupRowModel[] {
@@ -1109,43 +1155,32 @@ function sortGroupRows(rows: GroupRowModel[], sortId: SortId): GroupRowModel[] {
   return sorted
 }
 
-function compareExpenses(a: Expense, b: Expense, sortId: SortId) {
-  if (sortId === 'highest')
-    return b.amount - a.amount || a.occurredAt.localeCompare(b.occurredAt)
-  if (sortId === 'lowest')
-    return a.amount - b.amount || a.occurredAt.localeCompare(b.occurredAt)
-  if (sortId === 'newest')
-    return b.occurredAt.localeCompare(a.occurredAt) || b.amount - a.amount
-  return a.occurredAt.localeCompare(b.occurredAt) || b.amount - a.amount
-}
-
-function categoryPath(tree: CategoryTree, categoryId: string): string {
-  const names: string[] = []
-  let cur: string | null = categoryId
-  while (cur) {
-    const node = tree.byId.get(cur)
-    if (!node) break
-    names.unshift(node.name)
-    cur = node.parentId
-  }
-  return names.join(' › ') || 'Category'
-}
-
 // ---------- dates ----------
 
 function pad(n: number) {
   return String(n).padStart(2, '0')
 }
 
-function localDayKey(iso: string) {
-  const d = new Date(iso)
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+function parseDay(key: string) {
+  const [y, m, d] = key.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+function dayStart(d: Date) {
+  const x = new Date(d)
+  x.setHours(0, 0, 0, 0)
+  return x
+}
+
+function dayEnd(d: Date) {
+  const x = new Date(d)
+  x.setHours(23, 59, 59, 999)
+  return x
 }
 
 function dayLabel(key: string) {
-  const [y, m, d] = key.split('-').map(Number)
-  const date = new Date(y, m - 1, d)
-  const includeYear = y !== new Date().getFullYear()
+  const date = parseDay(key)
+  const includeYear = date.getFullYear() !== new Date().getFullYear()
   return date.toLocaleDateString(undefined, {
     weekday: 'short',
     month: 'short',
@@ -1161,16 +1196,6 @@ function resolveRange(
   customFrom: string,
   customTo: string,
 ): { from: string; to: string; label: string } {
-  const dayStart = (d: Date) => {
-    const x = new Date(d)
-    x.setHours(0, 0, 0, 0)
-    return x
-  }
-  const dayEnd = (d: Date) => {
-    const x = new Date(d)
-    x.setHours(23, 59, 59, 999)
-    return x
-  }
   const addDays = (d: Date, n: number) => {
     const x = new Date(d)
     x.setDate(x.getDate() + n)
@@ -1223,7 +1248,9 @@ function resolveRange(
       break
     }
     case 'month': {
-      const [y, m] = (monthVal || monthKeyOf(now)).split('-').map(Number)
+      const [y, m] = (monthVal || `${now.getFullYear()}-${pad(now.getMonth() + 1)}`)
+        .split('-')
+        .map(Number)
       from = monthStart(new Date(y, m - 1, 1))
       to = monthEnd(new Date(y, m - 1, 1))
       label = new Date(y, m - 1, 1).toLocaleDateString(undefined, {
@@ -1233,8 +1260,8 @@ function resolveRange(
       break
     }
     case 'custom': {
-      const fromDate = customFrom ? parseLocal(customFrom) : monthStart(now)
-      const toDate = customTo ? parseLocal(customTo) : now
+      const fromDate = customFrom ? parseDay(customFrom) : monthStart(now)
+      const toDate = customTo ? parseDay(customTo) : now
       from = dayStart(fromDate)
       to = dayEnd(toDate)
       label =
@@ -1245,15 +1272,6 @@ function resolveRange(
     }
   }
   return { from: from.toISOString(), to: to.toISOString(), label }
-}
-
-function monthKeyOf(d: Date) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`
-}
-
-function parseLocal(key: string) {
-  const [y, m, d] = key.split('-').map(Number)
-  return new Date(y, m - 1, d)
 }
 
 function fmtDay(d: Date) {

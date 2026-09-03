@@ -21,6 +21,12 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((p) => (p ? path.resolve(p) : undefined)),
+  // Where uploaded files live (user avatars). Relative paths are resolved
+  // against the working directory. Exposed under the /upload URL prefix.
+  UPLOAD_DIR: z
+    .string()
+    .default("upload")
+    .transform((p) => path.resolve(p)),
 });
 
 const parsed = envSchema.safeParse({

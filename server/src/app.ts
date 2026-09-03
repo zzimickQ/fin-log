@@ -11,7 +11,9 @@ import { prisma } from "./lib/db.js";
 import { ApiError } from "./lib/errors.js";
 import { registerSwagger } from "./plugins/swagger.js";
 import { registerStatic } from "./plugins/static.js";
+import { registerUploads } from "./plugins/upload.js";
 import { authRoutes } from "./routes/auth.js";
+import { analyticsRoutes } from "./routes/analytics.js";
 import { categoryRoutes } from "./routes/categories.js";
 import { expenseRoutes } from "./routes/expenses.js";
 import { familyRoutes } from "./routes/families.js";
@@ -93,6 +95,7 @@ export function buildApp(): FastifyInstance {
   app.register(registerSwagger);
 
   app.register(authRoutes);
+  app.register(analyticsRoutes);
   app.register(healthRoutes);
   app.register(meRoutes);
   app.register(familyRoutes);
@@ -101,7 +104,9 @@ export function buildApp(): FastifyInstance {
   app.register(expenseRoutes);
 
   // Last: serves the built web app + SPA fallback (no-op unless
-  // WEB_DIST_PATH is configured).
+  // WEB_DIST_PATH is configured). Uploads are served first so /upload files
+  // never hit the SPA fallback.
+  app.register(registerUploads);
   app.register(registerStatic);
 
   // Close the Prisma connection when the server shuts down.

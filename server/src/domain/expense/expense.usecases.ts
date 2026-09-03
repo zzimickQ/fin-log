@@ -94,6 +94,7 @@ export interface ExpenseListFilters {
   uncategorized?: boolean;
   createdById?: string;
   search?: string;
+  sort?: "newest" | "oldest" | "highest" | "lowest";
   limit: number;
   offset: number;
 }
@@ -133,11 +134,32 @@ export async function listExpenses(
       where,
       skip: filters.offset,
       take: filters.limit,
+      ...(filters.sort
+        ? {
+            orderBy: toExpenseOrder(filters.sort),
+          }
+        : {}),
     }),
     expenseRepository.count(where),
   ]);
 
   return { expenses: expenses.map(toExpenseDto), total };
+}
+
+/** Sort id → repository order. */
+function toExpenseOrder(
+  sort: "newest" | "oldest" | "highest" | "lowest",
+): { field: "occurredAt" | "amount"; dir: "asc" | "desc" } {
+  switch (sort) {
+    case "oldest":
+      return { field: "occurredAt", dir: "asc" };
+    case "highest":
+      return { field: "amount", dir: "desc" };
+    case "lowest":
+      return { field: "amount", dir: "asc" };
+    default:
+      return { field: "occurredAt", dir: "desc" };
+  }
 }
 
 export async function createExpense(

@@ -57,7 +57,8 @@ export const registerStatic = fp(async function registerStatic(
       if (
         (request.method === "GET" || request.method === "HEAD") &&
         !request.url.startsWith("/api") &&
-        !request.url.startsWith("/docs")
+        !request.url.startsWith("/docs") &&
+        !request.url.startsWith("/upload")
       ) {
         // SPA fallback: let the client-side router decide.
         return reply.sendFile("index.html");

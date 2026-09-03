@@ -94,6 +94,91 @@ export function useLedgerExpensesInRangeQuery(
   })
 }
 
+export interface ExpenseRowsFilter {
+  from: string
+  to: string
+  categoryId?: string
+  uncategorized?: boolean
+  sort?: 'newest' | 'oldest' | 'highest' | 'lowest'
+}
+
+/**
+ * Every matching expense row of a scope (all expenses in a range, one
+ * category, one day, uncategorized…). Fetched server-side (rows only exist
+ * at the leaf level) in 500-row pages until the total is reached.
+ */
+export function useLedgerExpenseRowsQuery(
+  ledgerId: string | null,
+  filter: ExpenseRowsFilter,
+) {
+  return useQuery({
+    queryKey: ['ledgers', ledgerId ?? '', 'expenses', 'rows', filter],
+    queryFn: async () => {
+      const all: Awaited<ReturnType<typeof api.listExpenses>>['expenses'] = []
+      for (let page = 0; page < 40; page++) {
+        const res = await api.listExpenses(ledgerId!, {
+          from: filter.from,
+          to: filter.to,
+          categoryId: filter.categoryId,
+          uncategorized: filter.uncategorized,
+          sort: filter.sort,
+          limit: 500,
+          offset: all.length,
+        })
+        all.push(...res.expenses)
+        if (all.length >= res.total) break
+      }
+      return all
+    },
+    enabled: ledgerId !== null && Boolean(filter.from) && Boolean(filter.to),
+  })
+}
+
+/** Category buckets of one analytics drill level (aggregated in the DB). */
+export function useLedgerAnalyticsCategoriesQuery(
+  ledgerId: string | null,
+  from: string,
+  to: string,
+  parentId: string | null,
+) {
+  return useQuery({
+    queryKey: [
+      'ledgers',
+      ledgerId ?? '',
+      'analytics',
+      'categories',
+      from,
+      to,
+      parentId ?? '',
+    ],
+    queryFn: () => api.analyticsCategories(ledgerId!, from, to, parentId),
+    enabled: ledgerId !== null && Boolean(from) && Boolean(to),
+  })
+}
+
+/** Per-day buckets for a range (aggregated in Postgres). */
+export function useLedgerAnalyticsDaysQuery(
+  ledgerId: string | null,
+  from: string,
+  to: string,
+  tzOffsetMinutes: number,
+) {
+  return useQuery({
+    queryKey: [
+      'ledgers',
+      ledgerId ?? '',
+      'analytics',
+      'days',
+      from,
+      to,
+      tzOffsetMinutes,
+    ],
+    queryFn: () =>
+      api.analyticsDays(ledgerId!, from, to, tzOffsetMinutes),
+    enabled: ledgerId !== null && Boolean(from) && Boolean(to),
+  })
+}
+
 export function useRecentExpensesQuery(limit = 8) {
   return useQuery({
     queryKey: queryKeys.recentExpenses(limit),
@@ -157,6 +242,7 @@ function clearExpenseCaches(
   void qc.invalidateQueries({ queryKey: ['ledgers', ledgerId, 'expenses'] })
   void qc.invalidateQueries({ queryKey: ['ledgers', ledgerId, 'totals'] })
   void qc.invalidateQueries({ queryKey: ['ledgers', ledgerId, 'breakdown'] })
+  void qc.invalidateQueries({ queryKey: ['ledgers', ledgerId, 'analytics'] })
   void qc.invalidateQueries({ queryKey: queryKeys.family(familyId) })
   void qc.invalidateQueries({ queryKey: ['expenses', 'recent'] })
   void qc.invalidateQueries({ queryKey: queryKeys.myLedgers })

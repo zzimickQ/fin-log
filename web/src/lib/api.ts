@@ -75,6 +75,17 @@ function qs(
 }
 
 export const api = {
+  // ---- profile picture ----
+  uploadAvatar: (data: string) =>
+    unwrap(
+      betterFetch<{ url: string }>('/me/avatar', {
+        method: 'POST',
+        body: { data },
+      }),
+    ),
+  removeAvatar: () =>
+    unwrap(betterFetch<void>('/me/avatar', { method: 'DELETE' })),
+
   // ---- families ----
   listFamilies: () =>
     unwrap(betterFetch<{ families: FamilySummary[] }>('/families')),
@@ -168,6 +179,46 @@ export const api = {
       }>(`/ledgers/${ledgerId}/breakdown`, { query: qs({ from, to }) }),
     ),
 
+  // ---- analytics (aggregated in the database) ----
+
+  /** Aggregate buckets of one category drill level (DB-first). */
+  analyticsCategories: (
+    ledgerId: string,
+    from: string,
+    to: string,
+    parentId: string | null,
+  ) =>
+    unwrap(
+      betterFetch<{
+        children: {
+          id: string
+          name: string
+          hasChildren: boolean
+          sum: number
+          count: number
+        }[]
+        direct: { sum: number; count: number }
+        uncategorized: { sum: number; count: number }
+      }>(`/ledgers/${ledgerId}/analytics/categories`, {
+        query: qs({ from, to, parentId: parentId ?? undefined }),
+      }),
+    ),
+
+  /** Exact per-day buckets for a range (aggregated in Postgres). */
+  analyticsDays: (
+    ledgerId: string,
+    from: string,
+    to: string,
+    tzOffsetMinutes: number,
+  ) =>
+    unwrap(
+      betterFetch<{
+        days: { date: string; sum: number; count: number }[]
+      }>(`/ledgers/${ledgerId}/analytics/days`, {
+        query: qs({ from, to, tzOffsetMinutes: String(tzOffsetMinutes) }),
+      }),
+    ),
+
   // ---- categories ----
   getCategories: (familyId: string) =>
     unwrap(
@@ -213,6 +264,7 @@ export const api = {
       uncategorized?: boolean
       from?: string
       to?: string
+      sort?: 'newest' | 'oldest' | 'highest' | 'lowest'
       limit?: number
       offset?: number
     } = {},

@@ -104,11 +104,14 @@ export const expenseRepository = {
     where: ExpenseWhereInput;
     skip: number;
     take: number;
+    orderBy?: { field: "occurredAt" | "amount"; dir: "asc" | "desc" };
   }) {
     return prisma.expense.findMany({
       where: params.where,
       include: expenseInclude,
-      orderBy: { occurredAt: "desc" },
+      orderBy: params.orderBy
+        ? { [params.orderBy.field]: params.orderBy.dir }
+        : { occurredAt: "desc" },
       skip: params.skip,
       take: params.take,
     });
@@ -180,6 +183,35 @@ export const expenseRepository = {
       orderBy: { occurredAt: "desc" },
       take: limit,
     });
+  },
+
+  /**
+   * Per-local-day buckets for a ledger in a range. `occurredAt` is stored as
+   * UTC-naive, so we shift by the viewer's UTC offset (minutes) before
+   * truncating to a date — aggregation happens fully in Postgres.
+   */
+  async dayBuckets(
+    ledgerId: string,
+    range: { from: Date; to: Date },
+    tzOffsetMinutes: number,
+  ) {
+    const rows = await prisma.$queryRaw<{
+      date: string;
+      count: number;
+      sum: number;
+    }[]>`
+      SELECT
+        to_char("occurredAt" + (${tzOffsetMinutes} * INTERVAL '1 minute'), 'YYYY-MM-DD') AS date,
+        COUNT(*)::int AS count,
+        COALESCE(SUM("amount"), 0)::float8 AS sum
+      FROM "expense"
+      WHERE "ledgerId" = ${ledgerId}
+        AND "occurredAt" >= ${range.from}
+        AND "occurredAt" <= ${range.to}
+      GROUP BY 1
+      ORDER BY 1
+    `;
+    return rows.map((r) => ({ date: r.date, count: r.count, sum: Number(r.sum) }));
   },
 };
 

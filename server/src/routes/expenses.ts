@@ -71,6 +71,7 @@ export async function expenseRoutes(app: FastifyInstance) {
           .transform((v) => v === "true"),
         createdById: z.string().optional(),
         search: z.string().optional(),
+        sort: z.enum(["newest", "oldest", "highest", "lowest"]).optional(),
         limit: z.coerce.number().int().min(1).max(500).default(100),
         offset: z.coerce.number().int().min(0).default(0),
       }),

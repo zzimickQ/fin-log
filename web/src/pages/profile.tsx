@@ -1,12 +1,14 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   changePassword,
   getSession,
   updateUser,
   useSession,
 } from '@/lib/auth-client'
+import { api } from '@/lib/api'
 import { toast, useTimeFormatStore } from '@/lib/stores'
 import type { TimeMode } from '@/lib/stores'
 import {
@@ -28,7 +30,7 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { KeyRound, ShieldCheck, UserRound, Clock } from 'lucide-react'
+import { Camera, KeyRound, ShieldCheck, UserRound, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /** Normalize a better-auth client error into a readable message. */
@@ -84,6 +86,8 @@ export function ProfilePage() {
         </div>
       </div>
 
+      <ProfilePictureCard name={user.name} image={user.image ?? null} />
+
       <ProfileCard
         name={user.name}
         email={user.email}
@@ -95,6 +99,160 @@ export function ProfilePage() {
       <PasswordCard />
     </div>
   )
+}
+
+// ---------- profile picture ----------
+
+function ProfilePictureCard({
+  name,
+  image,
+}: {
+  name: string
+  image: string | null
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const queryClient = useQueryClient()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  /** Refresh caches that embed the user's avatar (expense rows, members). */
+  function refreshAvatarCaches() {
+    void queryClient.invalidateQueries({ queryKey: ['families'] })
+    void queryClient.invalidateQueries({ queryKey: ['ledgers'] })
+    void queryClient.invalidateQueries({ queryKey: ['expenses'] })
+  }
+
+  async function onFile(file: File | undefined) {
+    if (!file) return
+    setError(null)
+    if (!file.type.startsWith('image/')) {
+      setError('Please choose an image file')
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError('Image must be under 10 MB')
+      return
+    }
+    setBusy(true)
+    try {
+      const base64 = await readFileAsBase64(file)
+      await api.uploadAvatar(base64)
+      await getSession()
+      refreshAvatarCaches()
+      toast.success('Profile picture updated')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function remove() {
+    setError(null)
+    setBusy(true)
+    try {
+      await api.removeAvatar()
+      await getSession()
+      refreshAvatarCaches()
+      toast.success('Profile picture removed')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not remove photo')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Camera className="size-4 text-muted-foreground" />
+          Profile picture
+        </CardTitle>
+        <CardDescription>
+          Shown next to the expenses you record. Photos are resized to a
+          small thumbnail on the server.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap items-center gap-4">
+          {image ? (
+            <img
+              src={image}
+              alt=""
+              referrerPolicy="no-referrer"
+              className="size-16 rounded-full object-cover ring-2 ring-border"
+            />
+          ) : (
+            <span className="flex size-16 items-center justify-center rounded-full bg-primary text-xl font-semibold text-primary-foreground select-none">
+              {initialsOf(name) || '?'}
+            </span>
+          )}
+
+          <div className="flex flex-col items-start gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={() => inputRef.current?.click()}
+              >
+                {busy ? 'Uploading…' : image ? 'Change photo' : 'Upload photo'}
+              </Button>
+              {image && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  disabled={busy}
+                  onClick={() => void remove()}
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              PNG, JPEG or WebP.
+            </p>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+          </div>
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          aria-hidden="true"
+          onChange={(e) => void onFile(e.target.files?.[0])}
+        />
+      </CardContent>
+    </Card>
+  )
+}
+
+/** Read a local file into its base64 payload. */
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('Could not read the file'))
+    reader.onload = () => {
+      const result = String(reader.result ?? '')
+      const comma = result.indexOf(',')
+      resolve(comma >= 0 ? result.slice(comma + 1) : result)
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+function initialsOf(name: string) {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join('')
 }
 
 // ---------- profile info ----------
