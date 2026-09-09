@@ -71,17 +71,27 @@ export async function requireLedgerAccess(
 
 /**
  * Resolve a category and require the user to be a member of the family that
- * owns it. Returns the category's familyId (and parentId) for downstream
- * queries.
+ * owns its ledger. Returns the category's ledgerId (and parentId) plus the
+ * familyId for downstream queries.
  */
 export async function requireCategoryAccess(
   userId: string,
   categoryId: string,
-): Promise<{ id: string; familyId: string; parentId: string | null }> {
+): Promise<{
+  id: string;
+  ledgerId: string;
+  familyId: string;
+  parentId: string | null;
+}> {
   const category = await categoryRepository.findById(categoryId);
   if (!category) throw notFound("Category not found");
-  await requireFamilyMembership(userId, category.familyId);
-  return category;
+  const ledger = await requireLedgerAccess(userId, category.ledgerId);
+  return {
+    id: category.id,
+    ledgerId: category.ledgerId,
+    parentId: category.parentId,
+    familyId: ledger.familyId,
+  };
 }
 
 export { FamilyRole };

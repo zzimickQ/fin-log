@@ -31,24 +31,6 @@ const memberSchema = z.object({
 
 const errorSchema = z.object({ message: z.string() });
 
-const categoryNodeSchema: z.ZodType<{
-  id: string;
-  name: string;
-  description: string | null;
-  parentId: string | null;
-  expenseCount: number;
-  children: z.infer<typeof categoryNodeSchema>[];
-}> = z.lazy(() =>
-  z.object({
-    id: z.string(),
-    name: z.string(),
-    description: z.string().nullable(),
-    parentId: z.string().nullable(),
-    expenseCount: z.number(),
-    children: z.array(categoryNodeSchema),
-  }),
-);
-
 const familyListSchema = z.object({
   families: z.array(
     z.object({
@@ -78,7 +60,6 @@ const familyDetailSchema = z.object({
       createdAt: z.date(),
     }),
   ),
-  categories: z.array(categoryNodeSchema),
   createdAt: z.date(),
 });
 
@@ -117,11 +98,13 @@ export async function familyRoutes(app: FastifyInstance) {
     },
   });
 
-  // ---------- family detail (members + ledgers + category tree) ----------
+  // ---------- family detail (members + ledgers) ----------
 
   routes.get("/api/families/:familyId", {
     schema: {
-      summary: "Family detail with members, ledgers and category tree",
+      summary: "Family detail with members and ledgers",
+      description:
+        "Categories are not family-wide: each ledger's own hierarchy is listed under GET /api/ledgers/:ledgerId/categories.",
       tags: ["families"],
       security: [{ sessionCookie: [] }],
       params: z.object({ familyId: z.string() }),

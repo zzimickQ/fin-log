@@ -161,8 +161,8 @@ export function MembersPage() {
         <CardHeader>
           <CardTitle>{family?.members.length ?? 0} people</CardTitle>
           <CardDescription>
-            Members can record expenses and manage categories and ledgers.
-            Admins manage members; owners can do everything.
+            Members can record expenses and manage the categories of each
+            ledger. Admins manage members; owners can do everything.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
@@ -260,7 +260,7 @@ export function MembersPage() {
             <DialogTitle>Remove {removing?.name}?</DialogTitle>
             <DialogDescription>
               They will no longer be able to view or edit this family's
-              ledgers and categories.
+              ledgers and their categories.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

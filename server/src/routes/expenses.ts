@@ -171,7 +171,7 @@ export async function expenseRoutes(app: FastifyInstance) {
     schema: {
       summary: "Assign categories to several expenses in one transaction",
       description:
-        "Body { items: [{ expenseId, categoryId }] }. Each category must belong to the family of the expense's ledger.",
+        "Body { items: [{ expenseId, categoryId }] }. Each category must belong to the same ledger as the expense it is assigned to.",
       tags: ["expenses"],
       security: [{ sessionCookie: [] }],
       body: z.object({

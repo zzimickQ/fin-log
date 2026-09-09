@@ -7,7 +7,9 @@
 // tree).
 //
 // Key design decisions (see docs/basic-doc.md):
-//  - Categories are family-scoped (shared across all ledgers of a family).
+//  - Every ledger owns its own self-contained category hierarchy: the
+//    categories of one ledger are invisible to another, even inside the
+//    same family, so each ledger can structure spending its own way.
 //  - The category hierarchy is a self-referencing tree with unlimited depth.
 //  - `Expense.categoryId` is optional: "capture first, categorize later".
 //  - `occurredAt` (when money was spent) is distinct from `createdAt`.
@@ -26,7 +28,6 @@ model Family {
 
   members    FamilyMember[]
   ledgers    Ledger[]
-  categories ExpenseCategory[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -62,6 +63,9 @@ model Ledger {
 
   family   Family    @relation(fields: [familyId], references: [id], onDelete: Cascade)
   expenses Expense[]
+
+  /// Each ledger carries its own category hierarchy (deleted with it).
+  categories ExpenseCategory[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -112,16 +116,17 @@ model Expense {
 
 model ExpenseCategory {
   id       String @id @default(cuid())
-  familyId String
+  ledgerId String
 
   name        String
   description String?
 
   /// Self-referencing hierarchy: null = root category, otherwise the id of
-  /// the parent category.
+  /// the parent category. Parents always belong to the same ledger as the
+  /// child.
   parentId String?
 
-  family   Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  ledger   Ledger @relation(fields: [ledgerId], references: [id], onDelete: Cascade)
   parent   ExpenseCategory?  @relation("ExpenseCategoryHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children ExpenseCategory[] @relation("ExpenseCategoryHierarchy")
   expenses Expense[]
@@ -129,13 +134,13 @@ model ExpenseCategory {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([familyId])
+  @@index([ledgerId])
   @@index([parentId])
 
-  /// Prevent duplicate sibling categories, e.g. two "Food" categories under
-  /// the same parent. (Postgres treats NULLs as distinct, so root-level
-  /// uniqueness is additionally enforced by a partial index added in the
-  /// migration, and by the service layer.)
-  @@unique([familyId, parentId, name])
+  /// Prevent duplicate sibling categories within a ledger, e.g. two "Food"
+  /// categories under the same parent. (Postgres treats NULLs as distinct,
+  /// so root-level uniqueness is additionally enforced by a partial index
+  /// added in the migration, and by the service layer.)
+  @@unique([ledgerId, parentId, name])
   @@map("expense_category")
 }

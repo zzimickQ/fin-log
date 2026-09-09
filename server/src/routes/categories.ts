@@ -44,30 +44,34 @@ const categorySchema = z.object({
 export async function categoryRoutes(app: FastifyInstance) {
   const routes = app.withTypeProvider<ZodTypeProvider>();
 
-  // ---------- category tree of a family ----------
+  // ---------- category tree of a ledger ----------
 
-  routes.get("/api/families/:familyId/categories", {
+  routes.get("/api/ledgers/:ledgerId/categories", {
     schema: {
-      summary: "List a family's categories as a nested tree",
+      summary: "List a ledger's categories as a nested tree",
+      description:
+        "Every ledger owns its own self-contained hierarchy; only the categories of this ledger are returned.",
       tags: ["categories"],
       security: [{ sessionCookie: [] }],
-      params: z.object({ familyId: z.string() }),
-      response: { 200: categoryTreeSchema, 401: errorSchema, 403: errorSchema },
+      params: z.object({ ledgerId: z.string() }),
+      response: { 200: categoryTreeSchema, 401: errorSchema, 403: errorSchema, 404: errorSchema },
     },
     handler: async (request) => {
       const session = await requireSession(request);
-      return getCategoryTree(session.user.id, request.params.familyId);
+      return getCategoryTree(session.user.id, request.params.ledgerId);
     },
   });
 
   // ---------- create a category ----------
 
-  routes.post("/api/families/:familyId/categories", {
+  routes.post("/api/ledgers/:ledgerId/categories", {
     schema: {
-      summary: "Create a category (optionally under a parent)",
+      summary: "Create a category in a ledger (optionally under a parent)",
+      description:
+        "The category is created inside the ledger's own hierarchy.",
       tags: ["categories"],
       security: [{ sessionCookie: [] }],
-      params: z.object({ familyId: z.string() }),
+      params: z.object({ ledgerId: z.string() }),
       body: z.object({
         name: z.string().trim().min(1).max(100),
         description: z.string().trim().max(500).optional(),
@@ -79,7 +83,7 @@ export async function categoryRoutes(app: FastifyInstance) {
       const session = await requireSession(request);
       const category = await createCategory(
         session.user.id,
-        request.params.familyId,
+        request.params.ledgerId,
         request.body,
       );
       reply.code(201);
@@ -92,6 +96,8 @@ export async function categoryRoutes(app: FastifyInstance) {
   routes.patch("/api/categories/:categoryId", {
     schema: {
       summary: "Update a category (rename, move under a new parent, describe)",
+      description:
+        "Moves are only allowed within the category's own ledger; a category can never be moved across ledgers.",
       tags: ["categories"],
       security: [{ sessionCookie: [] }],
       params: z.object({ categoryId: z.string() }),
@@ -117,7 +123,7 @@ export async function categoryRoutes(app: FastifyInstance) {
   routes.delete("/api/categories/:categoryId", {
     schema: {
       summary:
-        "Delete a category. Children are deleted too; expenses keep their data but lose the category.",
+        "Delete a category from its ledger. Children are deleted too; expenses keep their data but lose the category.",
       tags: ["categories"],
       security: [{ sessionCookie: [] }],
       params: z.object({ categoryId: z.string() }),

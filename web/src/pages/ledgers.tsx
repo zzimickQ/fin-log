@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import {
   useForm,
   type FieldErrors,
@@ -34,7 +34,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import type { LedgerSummary } from '@/lib/types'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { FolderTree, Pencil, Plus, Trash2 } from 'lucide-react'
 
 export function LedgersPage() {
   const { familyId = '' } = useParams<{ familyId: string }>()
@@ -85,6 +85,19 @@ export function LedgersPage() {
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    asChild
+                    variant="outline"
+                    size="sm"
+                    aria-label={`Manage ${ledger.name}'s categories`}
+                  >
+                    <Link
+                      to={`/admin/families/${familyId}/ledgers/${ledger.id}/categories`}
+                    >
+                      <FolderTree />
+                      Categories
+                    </Link>
+                  </Button>
                   <Button
                     variant="ghost"
                     size="icon-sm"

@@ -66,12 +66,6 @@ export function FamilyLayout() {
           Ledgers
         </NavLink>
         <NavLink
-          to={`/admin/families/${family.id}/categories`}
-          className={tabClass}
-        >
-          Categories
-        </NavLink>
-        <NavLink
           to={`/admin/families/${family.id}/members`}
           className={tabClass}
         >

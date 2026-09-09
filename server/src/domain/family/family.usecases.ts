@@ -1,7 +1,5 @@
 import { familyRepository } from "./family.repository.js";
 import { expenseRepository } from "../expense/expense.repository.js";
-import { categoryRepository } from "../category/category.repository.js";
-import { buildCategoryTree } from "../category/category.usecases.js";
 import { ApiError, conflict, forbidden, notFound } from "../../lib/errors.js";
 import {
   requireFamilyMembership,
@@ -12,8 +10,8 @@ import type { FamilyRole } from "../../generated/prisma/enums.js";
 /**
  * Family usecases — the "what should happen" of the family domain. They
  * enforce authorization and business rules, orchestrate repositories (also
- * from other domains, e.g. category tree + expense totals for the detail
- * view), and return API-ready shapes.
+ * from other domains, e.g. expense totals for the detail view), and return
+ * API-ready shapes.
  */
 
 // ---------- families ----------
@@ -49,10 +47,9 @@ export async function createFamily(userId: string, name: string) {
 export async function getFamilyDetail(userId: string, familyId: string) {
   const membership = await requireFamilyMembership(userId, familyId);
 
-  const [family, totals, categories] = await Promise.all([
+  const [family, totals] = await Promise.all([
     familyRepository.findById(familyId),
     expenseRepository.groupTotalsByLedger(familyId),
-    categoryRepository.findByFamily(familyId),
   ]);
   if (!family) throw notFound("Family not found");
 
@@ -82,7 +79,6 @@ export async function getFamilyDetail(userId: string, familyId: string) {
         createdAt: l.createdAt,
       };
     }),
-    categories: buildCategoryTree(categories),
     createdAt: family.createdAt,
   };
 }

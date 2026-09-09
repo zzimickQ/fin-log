@@ -6,6 +6,7 @@ import {
   useFamilyQuery,
   useLedgerAnalyticsCategoriesQuery,
   useLedgerAnalyticsDaysQuery,
+  useLedgerCategoriesQuery,
   useLedgerExpenseRowsQuery,
   useLedgerTotalsQuery,
   useUpdateExpenseMutation,
@@ -143,7 +144,10 @@ export function AnalyticsPage() {
 
 function AnalyticsFlow({ ledger }: { ledger: MyLedger }) {
   const { data: family } = useFamilyQuery(ledger.familyId)
-  const roots = useMemo(() => family?.categories ?? [], [family])
+  const categoriesQuery = useLedgerCategoriesQuery(ledger.id)
+  const roots = useMemo(() => categoriesQuery.data?.categories ?? [], [
+    categoriesQuery.data,
+  ])
   const members = useMemo(() => family?.members ?? [], [family])
 
   // ---- options state ----

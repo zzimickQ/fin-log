@@ -4,7 +4,7 @@ import { useActiveLedgerRow } from '@/lib/active-ledger'
 import {
   useCategorizeBatchMutation,
   useExpensesQuery,
-  useFamilyQuery,
+  useLedgerCategoriesQuery,
 } from '@/lib/queries'
 import { toast, useTimeFormatStore } from '@/lib/stores'
 import { flattenCategories } from '@/lib/category-helpers'
@@ -63,7 +63,7 @@ export function CategorizePage() {
 }
 
 function CategorizeFlow({ ledger }: { ledger: MyLedger }) {
-  const { data: family } = useFamilyQuery(ledger.familyId)
+  const categoriesQuery = useLedgerCategoriesQuery(ledger.id)
   const categorizeBatch = useCategorizeBatchMutation()
 
   const [limit, setLimit] = useState(PAGE)
@@ -78,7 +78,10 @@ function CategorizeFlow({ ledger }: { ledger: MyLedger }) {
 
   const expenses = useMemo(() => data?.expenses ?? [], [data])
   const total = data?.total ?? 0
-  const categories = useMemo(() => family?.categories ?? [], [family])
+  const categories = useMemo(
+    () => categoriesQuery.data?.categories ?? [],
+    [categoriesQuery.data],
+  )
   const flatCategories = useMemo(() => flattenCategories(categories), [categories])
 
   const selectedSum = useMemo(
@@ -189,13 +192,14 @@ function CategorizeFlow({ ledger }: { ledger: MyLedger }) {
           {flatCategories.length === 0 && (
             <Card>
               <CardContent className="py-3 text-sm text-muted-foreground">
-                No categories in <span className="font-medium">{ledger.familyName}</span>{' '}
-                yet — add some under{' '}
+                No categories in{' '}
+                <span className="font-medium">{ledger.name}</span> yet — add
+                some under{' '}
                 <Link
-                  to={`/admin/families/${ledger.familyId}/categories`}
+                  to={`/admin/families/${ledger.familyId}/ledgers/${ledger.id}/categories`}
                   className="font-medium text-foreground underline underline-offset-2"
                 >
-                  Admin › Categories
+                  Admin › Ledgers › Categories
                 </Link>
                 , then come back to sort these.
               </CardContent>

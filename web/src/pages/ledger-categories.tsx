@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { useForm, Controller } from 'react-hook-form'
 import {
   useCreateCategoryMutation,
   useDeleteCategoryMutation,
   useFamilyQuery,
+  useLedgerCategoriesQuery,
   useUpdateCategoryMutation,
 } from '@/lib/queries'
 import { toast } from '@/lib/stores'
@@ -40,7 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Folder, FolderPlus, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Folder, FolderPlus, Pencil, Plus, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface CategoryDialogState {
@@ -50,26 +51,46 @@ interface CategoryDialogState {
 }
 
 /**
- * Category manager. Structure only — grouped as one card per main category,
- * with sub-categories rendered as nested sub-cards.
+ * Per-ledger category manager. Categories are ledger-scoped: every ledger
+ * owns its own self-contained hierarchy, so this page edits exactly one
+ * ledger's tree (structure only — one card per main category with
+ * sub-categories nested as sub-cards).
  */
-export function CategoriesPage() {
-  const { familyId = '' } = useParams<{ familyId: string }>()
+export function LedgerCategoriesPage() {
+  const { familyId = '', ledgerId = '' } = useParams<{
+    familyId: string
+    ledgerId: string
+  }>()
+  const categoriesQuery = useLedgerCategoriesQuery(ledgerId)
   const { data: family } = useFamilyQuery(familyId)
   const [dialog, setDialog] = useState<CategoryDialogState | null>(null)
   const [moving, setMoving] = useState<CategoryNode | null>(null)
   const [deleting, setDeleting] = useState<CategoryNode | null>(null)
 
-  const categories = family?.categories ?? []
+  const ledger = family?.ledgers.find((l) => l.id === ledgerId)
+  const categories = categoriesQuery.data?.categories ?? []
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Categories</h2>
+          <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted-foreground">
+            <Link to={`/admin/families/${familyId}/ledgers`}>
+              <ArrowLeft />
+              Ledgers
+            </Link>
+          </Button>
+          <h2 className="text-lg font-semibold">
+            Categories
+            {ledger ? (
+              <span className="font-normal text-muted-foreground">
+                {' '}· {ledger.name}
+              </span>
+            ) : null}
+          </h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Shared across ledgers of the family. Main categories nest their
-            sub-categories.
+            This ledger's own hierarchy — other ledgers keep theirs
+            separately. Main categories nest their sub-categories.
           </p>
         </div>
         <Button size="sm" onClick={() => setDialog({ mode: 'create' })}>
@@ -78,10 +99,13 @@ export function CategoriesPage() {
         </Button>
       </div>
 
-      {categories.length === 0 ? (
+      {categoriesQuery.isPending ? (
+        <p className="text-sm text-muted-foreground">Loading categories…</p>
+      ) : categories.length === 0 ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            No categories yet. Create one to organize expenses later.
+            No categories in this ledger yet. Create one to organize its
+            expenses later.
           </CardContent>
         </Card>
       ) : (
@@ -106,7 +130,7 @@ export function CategoriesPage() {
               ? `edit-${dialog.category!.id}`
               : `create-${dialog.parentId ?? 'root'}`
           }
-          familyId={familyId}
+          ledgerId={ledgerId}
           state={dialog}
           categories={categories}
           onClose={() => setDialog(null)}
@@ -115,7 +139,7 @@ export function CategoriesPage() {
       {moving && (
         <MoveDialog
           key={moving.id}
-          familyId={familyId}
+          ledgerId={ledgerId}
           node={moving}
           categories={categories}
           onClose={() => setMoving(null)}
@@ -123,7 +147,7 @@ export function CategoriesPage() {
       )}
       {deleting && (
         <DeleteDialog
-          familyId={familyId}
+          ledgerId={ledgerId}
           node={deleting}
           onClose={() => setDeleting(null)}
         />
@@ -302,12 +326,12 @@ function NodeActions({
 // ---------- create / edit dialog ----------
 
 function CategoryDialog({
-  familyId,
+  ledgerId,
   state,
   categories,
   onClose,
 }: {
-  familyId: string
+  ledgerId: string
   state: CategoryDialogState
   categories: CategoryNode[]
   onClose: () => void
@@ -335,7 +359,7 @@ function CategoryDialog({
     if (isEdit) {
       await updateCategory.mutateAsync({
         categoryId: category!.id,
-        familyId,
+        ledgerId,
         data: {
           name: values.name,
           description: values.description || null,
@@ -345,7 +369,7 @@ function CategoryDialog({
       toast.success(`Category “${values.name}” updated`)
     } else {
       await createCategory.mutateAsync({
-        familyId,
+        ledgerId,
         data: {
           name: values.name,
           description: values.description || undefined,
@@ -365,8 +389,8 @@ function CategoryDialog({
             <DialogTitle>{isEdit ? 'Edit category' : 'New category'}</DialogTitle>
             <DialogDescription>
               {isEdit
-                ? 'Rename, describe, or move this category.'
-                : 'Create a category. Leave parent empty for a main category.'}
+                ? 'Rename, describe, or move this category within this ledger.'
+                : 'Create a category for this ledger. Leave parent empty for a main category.'}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-4 py-4">
@@ -434,12 +458,12 @@ function CategoryDialog({
 // ---------- move dialog ----------
 
 function MoveDialog({
-  familyId,
+  ledgerId,
   node,
   categories,
   onClose,
 }: {
-  familyId: string
+  ledgerId: string
   node: CategoryNode
   categories: CategoryNode[]
   onClose: () => void
@@ -459,7 +483,7 @@ function MoveDialog({
   async function onSubmit(values: MoveCategoryValues) {
     await updateCategory.mutateAsync({
       categoryId: node.id,
-      familyId,
+      ledgerId,
       data: { parentId: values.parentId || null },
     })
     toast.success(`Moved “${node.name}”`)
@@ -473,7 +497,8 @@ function MoveDialog({
           <DialogHeader>
             <DialogTitle>Move “{node.name}”</DialogTitle>
             <DialogDescription>
-              Choose a new parent. Descendants of the category are excluded.
+              Choose a new parent. Moves stay inside this ledger; descendants
+              of the category are excluded.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-2 py-4">
@@ -515,11 +540,11 @@ function MoveDialog({
 // ---------- delete dialog ----------
 
 function DeleteDialog({
-  familyId,
+  ledgerId,
   node,
   onClose,
 }: {
-  familyId: string
+  ledgerId: string
   node: CategoryNode
   onClose: () => void
 }) {
@@ -549,7 +574,7 @@ function DeleteDialog({
             disabled={deleteCategory.isPending}
             onClick={() =>
               void deleteCategory
-                .mutateAsync({ categoryId: node.id, familyId })
+                .mutateAsync({ categoryId: node.id, ledgerId })
                 .then(() => {
                   toast.success(`Deleted “${node.name}”`)
                   onClose()

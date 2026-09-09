@@ -20,6 +20,9 @@ export const queryKeys = {
     ['ledgers', ledgerId, 'totals', from, to] as const,
   ledgerBreakdown: (ledgerId: string, from: string, to: string) =>
     ['ledgers', ledgerId, 'breakdown', from, to] as const,
+  /** The category hierarchy of one ledger (self-contained per ledger). */
+  ledgerCategories: (ledgerId: string) =>
+    ['ledgers', ledgerId, 'categories'] as const,
   recentExpenses: (limit: number) => ['expenses', 'recent', limit] as const,
   myLedgers: ['ledgers', 'mine'] as const,
 }
@@ -38,6 +41,15 @@ export function useFamilyQuery(familyId: string | null) {
     queryKey: queryKeys.family(familyId ?? ''),
     queryFn: () => api.getFamily(familyId!),
     enabled: familyId !== null,
+  })
+}
+
+/** The category tree of one ledger (each ledger owns its own). */
+export function useLedgerCategoriesQuery(ledgerId: string | null) {
+  return useQuery({
+    queryKey: queryKeys.ledgerCategories(ledgerId ?? ''),
+    queryFn: () => api.getCategories(ledgerId!),
+    enabled: ledgerId !== null,
   })
 }
 
@@ -234,15 +246,10 @@ function onMutationError(err: unknown) {
   toast.error(err instanceof Error ? err.message : 'Something went wrong')
 }
 
-function clearExpenseCaches(
-  qc: QueryClient,
-  ledgerId: string,
-  familyId: string,
-) {
-  void qc.invalidateQueries({ queryKey: ['ledgers', ledgerId, 'expenses'] })
-  void qc.invalidateQueries({ queryKey: ['ledgers', ledgerId, 'totals'] })
-  void qc.invalidateQueries({ queryKey: ['ledgers', ledgerId, 'breakdown'] })
-  void qc.invalidateQueries({ queryKey: ['ledgers', ledgerId, 'analytics'] })
+function clearLedgerCaches(qc: QueryClient, ledgerId: string, familyId: string) {
+  // Everything that depends on the ledger: expenses, totals, breakdown,
+  // analytics buckets and its category hierarchy.
+  void qc.invalidateQueries({ queryKey: ['ledgers', ledgerId] })
   void qc.invalidateQueries({ queryKey: queryKeys.family(familyId) })
   void qc.invalidateQueries({ queryKey: ['expenses', 'recent'] })
   void qc.invalidateQueries({ queryKey: queryKeys.myLedgers })
@@ -353,7 +360,7 @@ export function useDeleteLedgerMutation() {
       api.deleteLedger(args.ledgerId),
     onSuccess: (_data, { ledgerId, familyId }) => {
       void invalidate([queryKeys.family(familyId)])
-      void invalidate([['ledgers', ledgerId, 'expenses']])
+      void invalidate([['ledgers', ledgerId]])
       void invalidate([queryKeys.myLedgers])
     },
     onError: onMutationError,
@@ -376,49 +383,54 @@ export function useUpdateLedgerMutation() {
   })
 }
 
-// ---------- category mutations ----------
+// ---------- category mutations (each ledger owns its hierarchy) ----------
 
 export function useCreateCategoryMutation() {
-  const invalidate = useInvalidate()
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: ({
-      familyId,
+      ledgerId,
       data,
     }: {
-      familyId: string
+      ledgerId: string
       data: { name: string; description?: string; parentId?: string | null }
-    }) => api.createCategory(familyId, data),
-    onSuccess: (_data, { familyId }) =>
-      invalidate([queryKeys.family(familyId)]),
+    }) => api.createCategory(ledgerId, data),
+    onSuccess: (_data, { ledgerId }) => {
+      // A category change can shift every expense/bucket view of the ledger,
+      // so refresh the whole ledger subtree under this key.
+      void qc.invalidateQueries({ queryKey: ['ledgers', ledgerId] })
+    },
     onError: onMutationError,
   })
 }
 
 export function useUpdateCategoryMutation() {
-  const invalidate = useInvalidate()
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: (args: {
       categoryId: string
-      familyId: string
+      ledgerId: string
       data: {
         name?: string
         description?: string | null
         parentId?: string | null
       }
     }) => api.updateCategory(args.categoryId, args.data),
-    onSuccess: (_data, { familyId }) =>
-      invalidate([queryKeys.family(familyId)]),
+    onSuccess: (_data, { ledgerId }) => {
+      void qc.invalidateQueries({ queryKey: ['ledgers', ledgerId] })
+    },
     onError: onMutationError,
   })
 }
 
 export function useDeleteCategoryMutation() {
-  const invalidate = useInvalidate()
+  const qc = useQueryClient()
   return useMutation({
-    mutationFn: (args: { categoryId: string; familyId: string }) =>
+    mutationFn: (args: { categoryId: string; ledgerId: string }) =>
       api.deleteCategory(args.categoryId),
-    onSuccess: (_data, { familyId }) =>
-      invalidate([queryKeys.family(familyId)]),
+    onSuccess: (_data, { ledgerId }) => {
+      void qc.invalidateQueries({ queryKey: ['ledgers', ledgerId] })
+    },
     onError: onMutationError,
   })
 }
@@ -434,7 +446,7 @@ export function useCreateExpenseMutation() {
       data: Parameters<typeof api.createExpense>[1]
     }) => api.createExpense(args.ledgerId, args.data),
     onSuccess: (_data, { ledgerId, familyId }) => {
-      clearExpenseCaches(qc, ledgerId, familyId)
+      clearLedgerCaches(qc, ledgerId, familyId)
     },
     onError: onMutationError,
   })
@@ -450,7 +462,7 @@ export function useUpdateExpenseMutation() {
       data: Parameters<typeof api.updateExpense>[1]
     }) => api.updateExpense(args.expenseId, args.data),
     onSuccess: (_data, { ledgerId, familyId }) => {
-      clearExpenseCaches(qc, ledgerId, familyId)
+      clearLedgerCaches(qc, ledgerId, familyId)
     },
     onError: onMutationError,
   })
@@ -466,7 +478,7 @@ export function useCategorizeExpenseMutation() {
       categoryId: string | null
     }) => api.categorizeExpense(args.expenseId, args.categoryId),
     onSuccess: (_data, { ledgerId, familyId }) => {
-      clearExpenseCaches(qc, ledgerId, familyId)
+      clearLedgerCaches(qc, ledgerId, familyId)
     },
     onError: onMutationError,
   })
@@ -481,7 +493,7 @@ export function useCategorizeBatchMutation() {
       items: { expenseId: string; categoryId: string }[]
     }) => api.categorizeBatch(args.items),
     onSuccess: (_data, { ledgerId, familyId }) => {
-      clearExpenseCaches(qc, ledgerId, familyId)
+      clearLedgerCaches(qc, ledgerId, familyId)
     },
     onError: onMutationError,
   })
@@ -496,7 +508,7 @@ export function useDeleteExpenseMutation() {
       familyId: string
     }) => api.deleteExpense(args.expenseId),
     onSuccess: (_data, { ledgerId, familyId }) => {
-      clearExpenseCaches(qc, ledgerId, familyId)
+      clearLedgerCaches(qc, ledgerId, familyId)
     },
     onError: onMutationError,
   })

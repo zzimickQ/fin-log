@@ -1,14 +1,12 @@
 import { categoryRepository } from "./category.repository.js";
 import { badRequest, conflict, notFound } from "../../lib/errors.js";
-import {
-  requireCategoryAccess,
-  requireFamilyMembership,
-} from "../../lib/guards.js";
+import { requireCategoryAccess, requireLedgerAccess } from "../../lib/guards.js";
 
 /**
  * Category usecases — tree building plus the hierarchy business rules from
- * docs/basic-doc.md:
- *  - the parent must belong to the same family as the child
+ * docs/basic-doc.md. Categories are ledger-scoped: every ledger owns its own
+ * self-contained hierarchy, so all checks happen inside one ledger:
+ *  - the parent must belong to the same ledger as the child
  *  - a category cannot be moved under itself or one of its descendants
  *  - sibling names must be unique (root duplicates are additionally guarded
  *    by a partial unique index in the migration)
@@ -31,7 +29,7 @@ type CategoryRow = {
   _count: { expenses: number };
 };
 
-/** Build a nested tree from the flat, family-scoped category rows. */
+/** Build a nested tree from the flat, ledger-scoped category rows. */
 export function buildCategoryTree(categories: CategoryRow[]): CategoryNode[] {
   const byParent = new Map<string | null, CategoryRow[]>();
   for (const c of categories) {
@@ -52,7 +50,7 @@ export function buildCategoryTree(categories: CategoryRow[]): CategoryNode[] {
 }
 
 async function assertValidParent(
-  familyId: string,
+  ledgerId: string,
   parentId: string | null,
   categoryId?: string,
 ): Promise<void> {
@@ -62,8 +60,8 @@ async function assertValidParent(
   }
   const parent = await categoryRepository.findParent(parentId);
   if (!parent) throw notFound("Parent category not found");
-  if (parent.familyId !== familyId) {
-    throw badRequest("A category's parent must belong to the same family");
+  if (parent.ledgerId !== ledgerId) {
+    throw badRequest("A category's parent must belong to the same ledger");
   }
   if (!categoryId) return;
 
@@ -81,13 +79,13 @@ async function assertValidParent(
 }
 
 async function assertUniqueSibling(
-  familyId: string,
+  ledgerId: string,
   parentId: string | null,
   name: string,
   excludeId?: string,
 ): Promise<void> {
   const existing = await categoryRepository.findSibling(
-    familyId,
+    ledgerId,
     parentId,
     name,
     excludeId,
@@ -99,25 +97,26 @@ async function assertUniqueSibling(
 
 // ---------- usecases ----------
 
-export async function getCategoryTree(userId: string, familyId: string) {
-  await requireFamilyMembership(userId, familyId);
-  const categories = await categoryRepository.findByFamily(familyId);
+export async function getCategoryTree(userId: string, ledgerId: string) {
+  // Membership is checked against the family that owns the ledger.
+  await requireLedgerAccess(userId, ledgerId);
+  const categories = await categoryRepository.findByLedger(ledgerId);
   return { categories: buildCategoryTree(categories) };
 }
 
 export async function createCategory(
   userId: string,
-  familyId: string,
+  ledgerId: string,
   input: { name: string; description?: string; parentId?: string | null },
 ) {
-  await requireFamilyMembership(userId, familyId);
+  await requireLedgerAccess(userId, ledgerId);
 
   const parentId = input.parentId ?? null;
-  await assertValidParent(familyId, parentId);
-  await assertUniqueSibling(familyId, parentId, input.name);
+  await assertValidParent(ledgerId, parentId);
+  await assertUniqueSibling(ledgerId, parentId, input.name);
 
   const category = await categoryRepository.create({
-    familyId,
+    ledgerId,
     name: input.name,
     description: input.description ?? null,
     parentId,
@@ -144,12 +143,17 @@ export async function updateCategory(
 
   const { name, parentId, description } = input;
   if (parentId !== undefined) {
-    await assertValidParent(info.familyId, parentId, categoryId);
+    await assertValidParent(info.ledgerId, parentId, categoryId);
   }
   if (name !== undefined) {
     const effectiveParent =
       parentId !== undefined ? parentId : info.parentId;
-    await assertUniqueSibling(info.familyId, effectiveParent, name, categoryId);
+    await assertUniqueSibling(
+      info.ledgerId,
+      effectiveParent,
+      name,
+      categoryId,
+    );
   }
 
   const category = await categoryRepository.update(categoryId, {

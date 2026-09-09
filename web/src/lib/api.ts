@@ -219,19 +219,21 @@ export const api = {
       }),
     ),
 
-  // ---- categories ----
-  getCategories: (familyId: string) =>
+  // ---- categories (scoped to a ledger) ----
+
+  /** The full category tree of one ledger. */
+  getCategories: (ledgerId: string) =>
     unwrap(
       betterFetch<{ categories: CategoryNode[] }>(
-        `/families/${familyId}/categories`,
+        `/ledgers/${ledgerId}/categories`,
       ),
     ),
   createCategory: (
-    familyId: string,
+    ledgerId: string,
     data: { name: string; description?: string; parentId?: string | null },
   ) =>
     unwrap(
-      betterFetch<CategoryNode>(`/families/${familyId}/categories`, {
+      betterFetch<CategoryNode>(`/ledgers/${ledgerId}/categories`, {
         method: 'POST',
         body: data,
       }),

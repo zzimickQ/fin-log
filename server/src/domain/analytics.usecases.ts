@@ -52,16 +52,15 @@ export async function ledgerCategoryLevel(
   range: RangeFilter,
   parentId: string | null = null,
 ) {
-  const ledger = await requireLedgerAccess(userId, ledgerId);
-  const familyId = ledger.familyId;
+  await requireLedgerAccess(userId, ledgerId);
 
-  const categories = await categoryRepository.findByFamily(familyId);
+  const categories = await categoryRepository.findByLedger(ledgerId);
   const byId = new Map(categories.map((c) => [c.id, c]));
   if (parentId && !byId.has(parentId)) {
     throw notFound("Category not found");
   }
-  if (parentId && byId.get(parentId)!.familyId !== familyId) {
-    throw badRequest("Category does not belong to this ledger's family");
+  if (parentId && byId.get(parentId)!.ledgerId !== ledgerId) {
+    throw badRequest("Category does not belong to this ledger");
   }
 
   const { byCategory, uncategorized } = await rangeAggregates(ledgerId, range);

@@ -4,6 +4,7 @@ import { useActiveLedgerRow } from '@/lib/active-ledger'
 import {
   useFamilyQuery,
   useLedgerBreakdownQuery,
+  useLedgerCategoriesQuery,
   useLedgerExpensesInRangeQuery,
   useLedgerTotalsQuery,
 } from '@/lib/queries'
@@ -44,6 +45,7 @@ export function TodayHome() {
   const totals = useLedgerTotalsQuery(ledger?.id ?? null, from, to)
   const breakdown = useLedgerBreakdownQuery(ledger?.id ?? null, from, to)
   const { data: family } = useFamilyQuery(ledger?.familyId ?? null)
+  const categories = useLedgerCategoriesQuery(ledger?.id ?? null)
   const transactions = useLedgerExpensesInRangeQuery(
     ledger?.id ?? null,
     from,
@@ -63,7 +65,7 @@ export function TodayHome() {
         walk(n.children, n.id)
       }
     }
-    walk(family?.categories ?? [], null)
+    walk(categories.data?.categories ?? [], null)
     return (categoryId: string) => {
       const parts: string[] = []
       let cur: string | null = categoryId
@@ -75,7 +77,7 @@ export function TodayHome() {
       }
       return parts.join(' › ')
     }
-  }, [family])
+  }, [categories.data])
 
   if (isPending) {
     return <p className="text-sm text-muted-foreground">Loading…</p>

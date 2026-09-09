@@ -1,11 +1,11 @@
 import { AppShell } from '@/components/app-shell'
 import { ProtectedRoute } from '@/components/protected-route'
 import { AnalyticsPage } from '@/pages/analytics'
-import { CategoriesPage } from '@/pages/categories'
 import { CategorizePage } from '@/pages/categorize'
 import { DashboardPage } from '@/pages/dashboard'
 import { FamilyLayout } from '@/pages/family-layout'
 import { HomePage } from '@/pages/home'
+import { LedgerCategoriesPage } from '@/pages/ledger-categories'
 import { LedgersPage } from '@/pages/ledgers'
 import { LogExpensePage } from '@/pages/log-expense'
 import { MembersPage } from '@/pages/members'
@@ -43,7 +43,11 @@ export default function App() {
               <Route path="families/:familyId" element={<FamilyLayout />}>
                 <Route index element={<Navigate to="ledgers" replace />} />
                 <Route path="ledgers" element={<LedgersPage />} />
-                <Route path="categories" element={<CategoriesPage />} />
+                {/* Each ledger owns its own category hierarchy. */}
+                <Route
+                  path="ledgers/:ledgerId/categories"
+                  element={<LedgerCategoriesPage />}
+                />
                 <Route path="members" element={<MembersPage />} />
               </Route>
             </Route>

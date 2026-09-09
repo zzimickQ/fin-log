@@ -79,8 +79,8 @@ export function DashboardPage() {
               <DialogHeader>
                 <DialogTitle>Create a family</DialogTitle>
                 <DialogDescription>
-                  A shared space for ledgers, categories and expenses — invite
-                  members after creating it.
+                  A shared space for ledgers and expenses — invite members
+                  after creating it. Each ledger keeps its own categories.
                 </DialogDescription>
               </DialogHeader>
               <div className="flex flex-col gap-4 py-4">

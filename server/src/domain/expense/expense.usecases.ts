@@ -63,18 +63,19 @@ interface LinkInput {
 }
 
 /**
- * Verify the payer is a family member and the category belongs to the
- * family that owns the ledger the expense is recorded in.
+ * Verify the payer is a family member and the category belongs to the same
+ * ledger the expense is recorded in (each ledger has its own hierarchy).
  */
 async function validateLinks(
   familyId: string,
+  ledgerId: string,
   input: LinkInput,
 ): Promise<void> {
   if (input.categoryId !== undefined && input.categoryId !== null) {
     const category = await categoryRepository.findById(input.categoryId);
     if (!category) throw notFound("Category not found");
-    if (category.familyId !== familyId) {
-      throw badRequest("Category does not belong to this family");
+    if (category.ledgerId !== ledgerId) {
+      throw badRequest("Category does not belong to this ledger");
     }
   }
   if (input.paidById !== undefined && input.paidById !== null) {
@@ -176,7 +177,7 @@ export async function createExpense(
   },
 ) {
   const ledger = await requireLedgerAccess(userId, ledgerId);
-  await validateLinks(ledger.familyId, input);
+  await validateLinks(ledger.familyId, ledgerId, input);
 
   const expense = await expenseRepository.create({
     ledgerId,
@@ -206,7 +207,7 @@ export async function updateExpense(
   },
 ) {
   const ledger = await expenseLedgerOf(userId, expenseId);
-  await validateLinks(ledger.familyId, input);
+  await validateLinks(ledger.familyId, ledger.id, input);
 
   const expense = await expenseRepository.update(expenseId, {
     ...(input.amount !== undefined && { amount: input.amount }),
@@ -250,13 +251,13 @@ export async function ledgerCategoryBreakdown(
   ledgerId: string,
   range?: { from?: string; to?: string },
 ) {
-  const ledger = await requireLedgerAccess(userId, ledgerId);
+  await requireLedgerAccess(userId, ledgerId);
   const [rows, categories] = await Promise.all([
     expenseRepository.categoryRows(ledgerId, {
       ...(range?.from ? { from: new Date(range.from) } : {}),
       ...(range?.to ? { to: new Date(range.to) } : {}),
     }),
-    categoryRepository.findByFamily(ledger.familyId),
+    categoryRepository.findByLedger(ledgerId),
   ]);
 
   // Category id → node, for resolving every expense's root parent.
@@ -317,7 +318,7 @@ export async function categorizeExpense(
   categoryId: string | null,
 ) {
   const ledger = await expenseLedgerOf(userId, expenseId);
-  await validateLinks(ledger.familyId, { categoryId });
+  await validateLinks(ledger.familyId, ledger.id, { categoryId });
 
   const expense = await expenseRepository.update(expenseId, { categoryId });
   return toExpenseDto(expense);
@@ -328,8 +329,8 @@ export async function categorizeExpense(
  *
  * Each item may target a different ledger (the UI uses one ledger at a
  * time, but the API stays general): authorization is per expense-ledger
- * family, and every category must belong to the family of the expense it
- * is assigned to.
+ * family, and every category must belong to the same ledger as the expense
+ * it is assigned to.
  */
 export async function categorizeExpenses(
   userId: string,
@@ -350,27 +351,25 @@ export async function categorizeExpenses(
   if (ledgers.length !== ledgerIds.length) {
     throw notFound("One or more ledgers were not found");
   }
-  const ledgerFamilyById = new Map(ledgers.map((l) => [l.id, l.familyId]));
   const familyIds = [
     ...new Set(ledgers.map((l) => l.familyId)),
   ];
   await Promise.all(familyIds.map((fid) => requireFamilyMembership(userId, fid)));
 
-  // Validate categories exist and belong to the right family.
+  // Validate categories exist and belong to the right ledger.
   const categoryIds = [...new Set(items.map((i) => i.categoryId))];
   const categories = await categoryRepository.findByIds(categoryIds);
   if (categories.length !== categoryIds.length) {
     throw notFound("One or more categories were not found");
   }
-  const categoryFamilyById = new Map(categories.map((c) => [c.id, c.familyId]));
+  const categoryLedgerById = new Map(categories.map((c) => [c.id, c.ledgerId]));
 
   // Validate every item, then keep only assignments that change something.
   const toApply = new Map<string, string[]>(); // categoryId → expense ids
   for (const item of items) {
     const expense = expenseById.get(item.expenseId)!;
-    const familyId = ledgerFamilyById.get(expense.ledgerId)!;
-    if (categoryFamilyById.get(item.categoryId) !== familyId) {
-      throw badRequest("Category does not belong to the expense's family");
+    if (categoryLedgerById.get(item.categoryId) !== expense.ledgerId) {
+      throw badRequest("Category does not belong to the expense's ledger");
     }
     if (expense.categoryId === item.categoryId) continue;
     const group = toApply.get(item.categoryId) ?? [];
@@ -404,11 +403,15 @@ export async function recentExpenses(userId: string, limit: number) {
   };
 }
 
-/** Resolve an expense, verify membership of its ledger's family. */
+/**
+ * Resolve an expense's ledger (via the expense), verifying membership of
+ * the family that owns it. Returns the authorized ledger for downstream
+ * scope checks.
+ */
 async function expenseLedgerOf(
   userId: string,
   expenseId: string,
-): Promise<{ familyId: string }> {
+): Promise<{ id: string; familyId: string }> {
   const expense = await expenseRepository.findById(expenseId);
   if (!expense) throw notFound("Expense not found");
   return requireLedgerAccess(userId, expense.ledgerId);

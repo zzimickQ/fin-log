@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useActiveLedgerRow } from '@/lib/active-ledger'
-import { useCreateExpenseMutation, useFamilyQuery } from '@/lib/queries'
+import { useCreateExpenseMutation, useLedgerCategoriesQuery } from '@/lib/queries'
 import { toast } from '@/lib/stores'
 import { flattenCategories, guessCategories } from '@/lib/category-helpers'
 import { formatMoney } from '@/lib/format'
@@ -59,9 +59,7 @@ export function LogExpensePage() {
 
 function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
   const isMobile = useIsMobile()
-  const { data: family, isPending: familyPending } = useFamilyQuery(
-    ledger.familyId,
-  )
+  const categoriesQuery = useLedgerCategoriesQuery(ledger.id)
   const createExpense = useCreateExpenseMutation()
 
   const [step, setStep] = useState<1 | 2 | 3>(1)
@@ -70,7 +68,10 @@ function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
   const [description, setDescription] = useState('')
   const [categoryId, setCategoryId] = useState('')
 
-  const categories = useMemo(() => family?.categories ?? [], [family])
+  const categories = useMemo(
+    () => categoriesQuery.data?.categories ?? [],
+    [categoriesQuery.data],
+  )
   const suggestions = useMemo(
     () => guessCategories(description, categories),
     [description, categories],
@@ -89,8 +90,8 @@ function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
 
   function nextFromDetails() {
     // Categories still loading: wait so we know whether to show step 3.
-    if (familyPending) return
-    // No categories in this family? Skip the optional step and save.
+    if (categoriesQuery.isPending) return
+    // No categories in this ledger? Skip the optional step and save.
     if (categories.length === 0) {
       void save()
       return
@@ -181,7 +182,7 @@ function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
               withTax={withTax}
               description={description}
               onChangeDescription={setDescription}
-              categoriesPending={familyPending}
+              categoriesPending={categoriesQuery.isPending}
               onBack={() => setStep(1)}
               onNext={nextFromDetails}
             />
@@ -518,7 +519,7 @@ function CategoryStep({
 
       {flat.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          No categories in this family yet — save it uncategorized for now.
+          No categories in this ledger yet — save it uncategorized for now.
         </p>
       )}
 

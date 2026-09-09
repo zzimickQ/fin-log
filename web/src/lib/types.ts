@@ -53,7 +53,6 @@ export interface CategoryNode {
   expenseCount: number
   children: CategoryNode[]
 }
-
 export interface CategoryBrief {
   id: string
   name: string
@@ -66,7 +65,6 @@ export interface FamilyDetail {
   myRole: FamilyRole
   members: FamilyMember[]
   ledgers: LedgerSummary[]
-  categories: CategoryNode[]
   createdAt: string
 }
 
