@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { dateInput, legacyWindowToDates, snapWindow } from './range'
 
 /**
  * Global client state (zustand).
@@ -74,6 +75,98 @@ export const useTimeFormatStore = create<TimeFormatStore>()(
       setMode: (mode) => set({ mode }),
     }),
     { name: 'finlog-time-format' },
+  ),
+)
+
+// ---------- analytics view options (persisted) ----------
+
+export type AnalyticsGrouping = 'category' | 'date' | 'list'
+export type AnalyticsSort = 'newest' | 'oldest' | 'highest' | 'lowest'
+
+/**
+ * The Analytics page's date range + grouping + sort selection.
+ *
+ * Persisted as ONE set shared across ledgers, so the chosen view survives
+ * page refreshes and stays applied when the active ledger changes. The
+ * window is stored as two plain local dates (inclusive) rather than a
+ * preset, which is what lets the ‹ › arrows shift it by its own length.
+ */
+export interface AnalyticsOptions {
+  /** Window start, `YYYY-MM-DD` (local, inclusive). */
+  fromDate: string
+  /** Window end, `YYYY-MM-DD` (local, inclusive). */
+  toDate: string
+  grouping: AnalyticsGrouping
+  sortId: AnalyticsSort
+}
+
+const defaultAnalyticsOptions: AnalyticsOptions = {
+  ...snapWindow('this-week', new Date()),
+  grouping: 'category',
+  sortId: 'highest',
+}
+
+interface AnalyticsOptionsStore {
+  options: AnalyticsOptions
+  /** Apply one or more option changes at once. */
+  setOptions: (patch: Partial<AnalyticsOptions>) => void
+  reset: () => void
+}
+
+/** Persisted in the browser (localStorage) so it survives reloads. */
+export const useAnalyticsOptionsStore = create<AnalyticsOptionsStore>()(
+  persist(
+    (set) => ({
+      options: defaultAnalyticsOptions,
+      setOptions: (patch) =>
+        set((s) => ({ options: { ...s.options, ...patch } })),
+      reset: () => set({ options: defaultAnalyticsOptions }),
+    }),
+    {
+      name: 'finlog-analytics-options',
+      version: 2,
+      // v1 stored preset/monthVal/custom dates; convert to an explicit
+      // date window so those preferences survive the redesign.
+      migrate: (persisted, version) => {
+        if (version >= 2) return persisted as AnalyticsOptionsStore
+        const legacy = (persisted as { options?: unknown } | null)?.options as
+          | {
+              preset?: string
+              monthVal?: string
+              customFrom?: string
+              customTo?: string
+              grouping?: AnalyticsGrouping
+              sortId?: AnalyticsSort
+            }
+          | undefined
+        const window = legacyWindowToDates(legacy, new Date())
+        return {
+          options: {
+            ...window,
+            grouping: legacy?.grouping ?? 'category',
+            sortId: legacy?.sortId ?? 'highest',
+          },
+        } as AnalyticsOptionsStore
+      },
+      // Re-hydrated preferences must never point past today (future has no
+      // data): clamp any window that ends later than today.
+      merge: (persisted, current) => {
+        const state = {
+          ...current,
+          ...(persisted as Partial<AnalyticsOptionsStore>),
+        }
+        const today = dateInput(new Date())
+        const o = state.options
+        if (o && o.toDate > today) {
+          state.options = {
+            ...o,
+            toDate: today,
+            ...(o.fromDate > today ? { fromDate: today } : {}),
+          }
+        }
+        return state
+      },
+    },
   ),
 )
 

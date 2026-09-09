@@ -13,7 +13,21 @@ import {
   type ExpenseRowsFilter,
 } from '@/lib/queries'
 import { formatMoney } from '@/lib/format'
-import { toast } from '@/lib/stores'
+import { toast, useAnalyticsOptionsStore } from '@/lib/stores'
+import type {
+  AnalyticsGrouping as Grouping,
+  AnalyticsSort as SortId,
+} from '@/lib/stores'
+import {
+  dateInput,
+  parseDateInput,
+  shiftWindow,
+  snapWindow,
+  windowLabel,
+  windowToIso,
+  type DateWindow,
+  type RangeSnap,
+} from '@/lib/range'
 import type {
   CategoryNode,
   Expense,
@@ -50,8 +64,8 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
-  FolderTree,
   Receipt,
   Trash2,
   Wallet,
@@ -59,18 +73,6 @@ import {
 import { cn } from '@/lib/utils'
 
 // ---------- types ----------
-
-type PresetId =
-  | 'this-week'
-  | 'last-week'
-  | 'two-weeks-ago'
-  | 'this-month'
-  | 'last-month'
-  | 'month'
-  | 'custom'
-
-type Grouping = 'category' | 'date' | 'list'
-type SortId = 'newest' | 'oldest' | 'highest' | 'lowest'
 
 type Drill =
   | { kind: 'root' }
@@ -95,13 +97,11 @@ interface CatRef {
   parentId: string | null
 }
 
-const PRESETS: { id: Exclude<PresetId, 'month'>; label: string }[] = [
+const QUICK_RANGES: { id: RangeSnap; label: string }[] = [
   { id: 'this-week', label: 'This week' },
   { id: 'last-week', label: 'Last week' },
-  { id: 'two-weeks-ago', label: '2 weeks ago' },
   { id: 'this-month', label: 'This month' },
   { id: 'last-month', label: 'Last month' },
-  { id: 'custom', label: 'Custom…' },
 ]
 
 const GROUPINGS: { id: Grouping; label: string }[] = [
@@ -150,19 +150,11 @@ function AnalyticsFlow({ ledger }: { ledger: MyLedger }) {
   ])
   const members = useMemo(() => family?.members ?? [], [family])
 
-  // ---- options state ----
-  const now = useMemo(() => new Date(), [])
-  const [preset, setPreset] = useState<PresetId>('this-week')
-  const [monthVal, setMonthVal] = useState('')
-  const [customFrom, setCustomFrom] = useState('')
-  const [customTo, setCustomTo] = useState('')
-  const [grouping, setGrouping] = useState<Grouping>('category')
-  const [sortId, setSortId] = useState<SortId>('highest')
+  // ---- options state (persisted: survives refresh + ledger switches) ----
+  const { options, setOptions } = useAnalyticsOptionsStore()
+  const { fromDate, toDate, grouping, sortId } = options
 
-  const range = useMemo(
-    () => resolveRange(preset, now, monthVal, customFrom, customTo),
-    [preset, now, monthVal, customFrom, customTo],
-  )
+  const range = useMemo(() => windowToIso(fromDate, toDate), [fromDate, toDate])
   const tzOffset = useMemo(() => -new Date().getTimezoneOffset(), [])
 
   return (
@@ -174,23 +166,28 @@ function AnalyticsFlow({ ledger }: { ledger: MyLedger }) {
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        <RangePicker
-          label={range.label}
-          preset={preset}
-          onPreset={setPreset}
-          monthVal={monthVal}
-          onMonth={(v) => {
-            setMonthVal(v)
-            if (v) setPreset('month')
-          }}
-          customFrom={customFrom}
-          onCustomFrom={setCustomFrom}
-          customTo={customTo}
-          onCustomTo={setCustomTo}
+      {/* Date range takes its own line; options sit below it. */}
+      <div className="flex flex-col gap-2">
+        <RangeBar
+          fromDate={fromDate}
+          toDate={toDate}
+          onWindow={(w) => setOptions(w)}
         />
-        <GroupingPicker grouping={grouping} onGrouping={setGrouping} />
-        <SortingPicker sortId={sortId} onSort={setSortId} />
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <GroupingTabs
+            grouping={grouping}
+            onGrouping={(g) => setOptions({ grouping: g })}
+          />
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-sm font-medium text-muted-foreground">
+              Sort
+            </span>
+            <SortingPicker
+              sortId={sortId}
+              onSort={(s) => setOptions({ sortId: s })}
+            />
+          </div>
+        </div>
       </div>
 
       <Results
@@ -230,16 +227,16 @@ function PickerPill(
       type="button"
       {...props}
       className={cn(
-        'flex max-w-full items-center gap-1.5 rounded-full border py-1 pr-2 pl-2.5 text-xs font-medium transition-colors',
+        'flex h-9 max-sm:h-10 max-w-full items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors',
         open
           ? 'border-primary/40 bg-muted text-foreground'
           : 'border-input bg-card text-muted-foreground hover:bg-muted hover:text-foreground',
         props.className,
       )}
     >
-      <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+      <Icon className="size-4 shrink-0 text-muted-foreground" />
       <span className="truncate">{label}</span>
-      <ChevronDown className="size-3 shrink-0 opacity-60" />
+      <ChevronDown className="size-3.5 shrink-0 opacity-60" />
     </button>
   )
 }
@@ -313,112 +310,233 @@ function ChoiceChip({
   )
 }
 
-function RangePicker({
-  label,
-  preset,
-  onPreset,
-  monthVal,
-  onMonth,
-  customFrom,
-  onCustomFrom,
-  customTo,
-  onCustomTo,
+/**
+ * The date range row: ‹ arrow | tap-to-open range text | › arrow. The
+ * arrows shift the whole window one window-length earlier/later.
+ */
+function RangeBar({
+  fromDate,
+  toDate,
+  onWindow,
 }: {
-  label: string
-  preset: PresetId
-  onPreset: (p: PresetId) => void
-  monthVal: string
-  onMonth: (v: string) => void
-  customFrom: string
-  onCustomFrom: (v: string) => void
-  customTo: string
-  onCustomTo: (v: string) => void
+  fromDate: string
+  toDate: string
+  onWindow: (w: DateWindow) => void
 }) {
   const [open, setOpen] = useState(false)
+  const today = dateInput(new Date())
+  const prev = shiftWindow(fromDate, toDate, -1)
+  const next = shiftWindow(fromDate, toDate, 1)
+  // The next window must never extend past today (future has no data).
+  const canGoNext = next.toDate <= today
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <PickerPillForwarded icon={CalendarDays} label={label} open={open} />
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-80">
-        <PopoverTitle>Date range</PopoverTitle>
-        <div className="flex flex-wrap gap-1.5">
-          {PRESETS.map((p) => (
-            <ChoiceChip
-              key={p.id}
-              active={preset === p.id}
-              onClick={() => onPreset(p.id)}
-            >
-              {p.label}
-            </ChoiceChip>
-          ))}
-          <Input
-            type="month"
-            aria-label="Pick a month"
-            className="h-9 w-36 rounded-full px-3"
-            value={monthVal}
-            onChange={(e) => onMonth(e.target.value)}
+    <div className="flex items-center gap-1.5">
+      <button
+        type="button"
+        aria-label="Earlier window"
+        title={`Shift back one window (${windowLabel(prev.fromDate, prev.toDate)})`}
+        onClick={() => onWindow(prev)}
+        className="flex size-9 max-sm:size-10 shrink-0 items-center justify-center rounded-full border border-input bg-background text-muted-foreground transition-colors outline-none select-none hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+      >
+        <ChevronLeft className="size-4" />
+      </button>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <RangeTrigger label={windowLabel(fromDate, toDate)} open={open} />
+        </PopoverTrigger>
+        <PopoverContent align="center" className="w-80">
+          <RangePopover
+            fromDate={fromDate}
+            toDate={toDate}
+            onApply={(w) => {
+              onWindow(w)
+              setOpen(false)
+            }}
           />
-        </div>
-        {preset === 'custom' && (
-          <div className="mt-3 grid grid-cols-2 gap-3 border-t pt-3">
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="range-from" className="text-xs">
-                From
-              </Label>
-              <Input
-                id="range-from"
-                type="date"
-                value={customFrom}
-                onChange={(e) => onCustomFrom(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="range-to" className="text-xs">
-                To
-              </Label>
-              <Input
-                id="range-to"
-                type="date"
-                value={customTo}
-                onChange={(e) => onCustomTo(e.target.value)}
-              />
-            </div>
-          </div>
-        )}
-      </PopoverContent>
-    </Popover>
+        </PopoverContent>
+      </Popover>
+      <button
+        type="button"
+        aria-label="Later window"
+        aria-disabled={!canGoNext}
+        disabled={!canGoNext}
+        title={
+          canGoNext
+            ? `Shift forward one window (${windowLabel(next.fromDate, next.toDate)})`
+            : 'Latest window — can\u2019t go past today'
+        }
+        onClick={() => onWindow(next)}
+        className="flex size-9 max-sm:size-10 shrink-0 items-center justify-center rounded-full border border-input bg-background text-muted-foreground transition-colors outline-none select-none hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-40"
+      >
+        <ChevronRight className="size-4" />
+      </button>
+    </div>
   )
 }
 
-function GroupingPicker({
+const RangeTrigger = forwardRef(function RangeTrigger(
+  {
+    label,
+    open,
+    ...props
+  }: {
+    label: string
+    open: boolean
+  } & React.ButtonHTMLAttributes<HTMLButtonElement>,
+  ref: React.ForwardedRef<HTMLButtonElement>,
+) {
+  return (
+    <button
+      ref={ref}
+      type="button"
+      {...props}
+      className={cn(
+        'flex h-9 max-sm:h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-full border px-4 text-sm font-medium transition-colors',
+        open
+          ? 'border-primary/40 bg-muted text-foreground'
+          : 'border-input bg-card text-muted-foreground hover:bg-muted hover:text-foreground',
+        props.className,
+      )}
+    >
+      <CalendarDays className="size-4 shrink-0 text-muted-foreground" />
+      <span className="truncate tabular-nums">{label}</span>
+      <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+    </button>
+  )
+})
+
+/** Popup behind the range text: quick ranges + manual from/to dates. */
+function RangePopover({
+  fromDate,
+  toDate,
+  onApply,
+}: {
+  fromDate: string
+  toDate: string
+  onApply: (w: DateWindow) => void
+}) {
+  const [from, setFrom] = useState(fromDate)
+  const [to, setTo] = useState(toDate)
+  const [error, setError] = useState<string | null>(null)
+  const today = dateInput(new Date())
+
+  function applyManual() {
+    if (!from || !to) {
+      setError('Pick both a start and an end date')
+      return
+    }
+    if (from > today || to > today) {
+      setError("Future dates aren't available yet")
+      return
+    }
+    if (parseDateInput(from).getTime() > parseDateInput(to).getTime()) {
+      setError('The end date must be on or after the start date')
+      return
+    }
+    setError(null)
+    onApply({ fromDate: from, toDate: to })
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <PopoverTitle>Quick ranges</PopoverTitle>
+        <div className="flex flex-wrap gap-1.5">
+          {QUICK_RANGES.map((q) => {
+            const w = snapWindow(q.id, new Date())
+            const active = w.fromDate === fromDate && w.toDate === toDate
+            return (
+              <ChoiceChip
+                key={q.id}
+                active={active}
+                onClick={() => onApply(w)}
+              >
+                {q.label}
+              </ChoiceChip>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="border-t pt-3">
+        <PopoverTitle>Custom range</PopoverTitle>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="range-from" className="text-xs">
+              From
+            </Label>
+            <Input
+              id="range-from"
+              type="date"
+              max={today}
+              value={from}
+              onChange={(e) => {
+                setFrom(e.target.value)
+                setError(null)
+              }}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="range-to" className="text-xs">
+              To
+            </Label>
+            <Input
+              id="range-to"
+              type="date"
+              max={today}
+              value={to}
+              onChange={(e) => {
+                setTo(e.target.value)
+                setError(null)
+              }}
+            />
+          </div>
+        </div>
+        {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+        <Button type="button" className="mt-3 w-full" onClick={applyManual}>
+          Apply range
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/** Always-visible pill/radio tabs for how results are grouped. */
+function GroupingTabs({
   grouping,
   onGrouping,
 }: {
   grouping: Grouping
   onGrouping: (g: Grouping) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const label = GROUPINGS.find((g) => g.id === grouping)?.label ?? ''
-
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <PickerPillForwarded icon={FolderTree} label={label} open={open} />
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-56">
-        <PopoverTitle>Grouping</PopoverTitle>
-        <OptionList
-          options={GROUPINGS.map((g) => ({ id: g.id, label: g.label }))}
-          selected={grouping}
-          onSelect={(v) => {
-            onGrouping(v as Grouping)
-            setOpen(false)
-          }}
-        />
-      </PopoverContent>
-    </Popover>
+    <div
+      role="radiogroup"
+      aria-label="Group results by"
+      className="flex flex-wrap items-center gap-1.5"
+    >
+      {GROUPINGS.map((g) => {
+        const active = grouping === g.id
+        return (
+          <button
+            key={g.id}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onGrouping(g.id)}
+            className={cn(
+              'flex h-9 max-sm:h-10 items-center rounded-full border px-3.5 text-sm font-medium transition-colors',
+              active
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-input bg-card text-muted-foreground hover:bg-muted hover:text-foreground',
+            )}
+          >
+            {g.label}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 
@@ -1161,10 +1279,6 @@ function sortGroupRows(rows: GroupRowModel[], sortId: SortId): GroupRowModel[] {
 
 // ---------- dates ----------
 
-function pad(n: number) {
-  return String(n).padStart(2, '0')
-}
-
 function parseDay(key: string) {
   const [y, m, d] = key.split('-').map(Number)
   return new Date(y, m - 1, d)
@@ -1191,93 +1305,4 @@ function dayLabel(key: string) {
     day: 'numeric',
     ...(includeYear ? { year: 'numeric' } : {}),
   })
-}
-
-function resolveRange(
-  preset: PresetId,
-  now: Date,
-  monthVal: string,
-  customFrom: string,
-  customTo: string,
-): { from: string; to: string; label: string } {
-  const addDays = (d: Date, n: number) => {
-    const x = new Date(d)
-    x.setDate(x.getDate() + n)
-    return x
-  }
-  const mondayOf = (d: Date) => {
-    const offset = (d.getDay() + 6) % 7
-    return dayStart(addDays(d, -offset))
-  }
-  const monthStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1)
-  const monthEnd = (d: Date) =>
-    new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999)
-
-  let from: Date
-  let to: Date
-  let label = ''
-
-  switch (preset) {
-    case 'this-week': {
-      from = mondayOf(now)
-      to = dayEnd(now)
-      label = 'This week'
-      break
-    }
-    case 'last-week': {
-      const monday = mondayOf(now)
-      from = addDays(monday, -7)
-      to = dayEnd(addDays(monday, -1))
-      label = 'Last week'
-      break
-    }
-    case 'two-weeks-ago': {
-      const monday = mondayOf(now)
-      from = addDays(monday, -14)
-      to = dayEnd(addDays(monday, -8))
-      label = '2 weeks ago'
-      break
-    }
-    case 'this-month': {
-      from = monthStart(now)
-      to = dayEnd(now)
-      label = 'This month'
-      break
-    }
-    case 'last-month': {
-      const last = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      from = monthStart(last)
-      to = monthEnd(last)
-      label = 'Last month'
-      break
-    }
-    case 'month': {
-      const [y, m] = (monthVal || `${now.getFullYear()}-${pad(now.getMonth() + 1)}`)
-        .split('-')
-        .map(Number)
-      from = monthStart(new Date(y, m - 1, 1))
-      to = monthEnd(new Date(y, m - 1, 1))
-      label = new Date(y, m - 1, 1).toLocaleDateString(undefined, {
-        month: 'long',
-        year: 'numeric',
-      })
-      break
-    }
-    case 'custom': {
-      const fromDate = customFrom ? parseDay(customFrom) : monthStart(now)
-      const toDate = customTo ? parseDay(customTo) : now
-      from = dayStart(fromDate)
-      to = dayEnd(toDate)
-      label =
-        customFrom && customTo
-          ? `${fmtDay(fromDate)} – ${fmtDay(toDate)}`
-          : 'Custom range'
-      break
-    }
-  }
-  return { from: from.toISOString(), to: to.toISOString(), label }
-}
-
-function fmtDay(d: Date) {
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
