@@ -1,12 +1,17 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useActiveLedgerRow } from '@/lib/active-ledger'
-import { useCreateExpenseMutation, useLedgerCategoriesQuery } from '@/lib/queries'
+import {
+  useCategorySuggestionsQuery,
+  useCreateExpenseMutation,
+  useLedgerCategoriesQuery,
+} from '@/lib/queries'
 import { toast } from '@/lib/stores'
 import { flattenCategories, guessCategories } from '@/lib/category-helpers'
 import { formatMoney } from '@/lib/format'
+import { useDebouncedValue } from '@/lib/use-debounced-value'
 import { useIsMobile } from '@/lib/use-media'
-import type { CategoryNode, MyLedger } from '@/lib/types'
+import type { CategoryNode, CategorySuggestion, MyLedger } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -28,6 +33,16 @@ const STEPS = [
   { id: 2, label: 'Details' },
   { id: 3, label: 'Category' },
 ]
+
+/** A suggestion normalized for display from either TypeSafe or the heuristic. */
+interface DisplaySuggestion {
+  id: string
+  name: string
+  path: string
+  depth: number
+  /** 0 when the suggestion came from the local heuristic. */
+  probability: number
+}
 
 export function LogExpensePage() {
   const { ledger, isPending } = useActiveLedgerRow()
@@ -66,15 +81,13 @@ function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
   const [amount, setAmount] = useState('0')
   const [withTax, setWithTax] = useState(false)
   const [description, setDescription] = useState('')
-  const [categoryId, setCategoryId] = useState('')
+  // null = untouched, so a confident prediction can auto-select the category.
+  // A string (including '') is an explicit choice and always wins.
+  const [categorySelection, setCategorySelection] = useState<string | null>(null)
 
   const categories = useMemo(
     () => categoriesQuery.data?.categories ?? [],
     [categoriesQuery.data],
-  )
-  const suggestions = useMemo(
-    () => guessCategories(description, categories),
-    [description, categories],
   )
 
   const baseAmount = Number(amount)
@@ -82,6 +95,53 @@ function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
   // What actually gets recorded: the entered amount, or amount + 15% tax.
   const recordedAmount = withTax ? round2(baseAmount * (1 + TAX_RATE)) : baseAmount
   const saving = createExpense.isPending
+
+  // --- category suggestions ------------------------------------------------
+  // TypeSafe predictions are debounced so the model is not called on every
+  // keystroke. The local heuristic fills the gap while the request is in
+  // flight, and when the server runs degraded (no API key / offline).
+  const debouncedDescription = useDebouncedValue(description.trim(), 350)
+  const suggestionsQuery = useCategorySuggestionsQuery(ledger.id, {
+    description: debouncedDescription,
+    amount: recordedAmount,
+  })
+  const localSuggestions = useMemo(
+    () => guessCategories(description, categories),
+    [description, categories],
+  )
+
+  const modelResult = suggestionsQuery.data
+  const suggestions: DisplaySuggestion[] = useMemo(() => {
+    if (modelResult) {
+      // The model explicitly said nothing fits — do not fall back to a guess.
+      if (modelResult.unknown) return []
+      return modelResult.suggestions.map(toDisplaySuggestion)
+    }
+    return localSuggestions.map((c) => ({ ...c, probability: 0 }))
+  }, [modelResult, localSuggestions])
+
+  // Auto-assign: a confident server prediction supplies the category until the
+  // user makes an explicit choice (`categorySelection` becomes non-null).
+  const autoCategoryId = modelResult?.autoAssignCategoryId ?? ''
+  const categoryId = categorySelection ?? autoCategoryId
+  const autoAssigned = categorySelection === null && autoCategoryId !== ''
+
+  const suggestionHint = useMemo(() => {
+    if (modelResult?.unknown) {
+      return 'No existing category fits this expense — it will be saved as unknown (uncategorized).'
+    }
+    if (autoAssigned) {
+      return "Auto-selected from this ledger's data. Change it if it looks wrong."
+    }
+    if (modelResult?.degraded && modelResult.suggestions.length > 0) {
+      return 'Basic match from your ledger data.'
+    }
+    return undefined
+  }, [modelResult, autoAssigned])
+
+  function selectCategory(id: string) {
+    setCategorySelection(id)
+  }
 
   function nextFromAmount() {
     if (!amountValid) return
@@ -116,7 +176,7 @@ function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
       setAmount('0')
       setWithTax(false)
       setDescription('')
-      setCategoryId('')
+      setCategorySelection(null)
       setStep(1)
       toast.success('Expense recorded')
     } catch {
@@ -192,8 +252,9 @@ function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
               categories={categories}
               suggestions={suggestions}
               categoryId={categoryId}
-              onChange={setCategoryId}
+              onChange={selectCategory}
               saving={saving}
+              hint={suggestionHint}
               onBack={() => setStep(2)}
               onSave={() => void save()}
             />
@@ -437,14 +498,16 @@ function CategoryStep({
   categoryId,
   onChange,
   saving,
+  hint,
   onBack,
   onSave,
 }: {
   categories: CategoryNode[]
-  suggestions: { id: string; name: string; path: string; depth: number }[]
+  suggestions: DisplaySuggestion[]
   categoryId: string
   onChange: (id: string) => void
   saving: boolean
+  hint?: string
   onBack: () => void
   onSave: () => void
 }) {
@@ -461,30 +524,40 @@ function CategoryStep({
         </p>
       </div>
 
-      {suggestions.length > 0 && (
+      {(suggestions.length > 0 || hint) && (
         <div className="flex flex-col gap-1.5">
-          <p className="flex items-center gap-1.5 text-xs font-medium text-foreground/80">
-            <Sparkles className="size-3.5" />
-            Looks like
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {suggestions.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => onChange(categoryId === s.id ? '' : s.id)}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors',
-                  categoryId === s.id
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'border-input bg-background hover:bg-muted',
-                )}
-              >
-                {s.name}
-                {categoryId === s.id && <Check className="size-3.5" />}
-              </button>
-            ))}
-          </div>
+          {suggestions.length > 0 && (
+            <>
+              <p className="flex items-center gap-1.5 text-xs font-medium text-foreground/80">
+                <Sparkles className="size-3.5" />
+                Looks like
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {suggestions.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => onChange(categoryId === s.id ? '' : s.id)}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors',
+                      categoryId === s.id
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-input bg-background hover:bg-muted',
+                    )}
+                  >
+                    {s.name}
+                    {s.probability > 0 && (
+                      <span className="text-xs tabular-nums opacity-70">
+                        {Math.round(s.probability * 100)}%
+                      </span>
+                    )}
+                    {categoryId === s.id && <Check className="size-3.5" />}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
         </div>
       )}
 
@@ -541,6 +614,17 @@ function CategoryStep({
 }
 
 // ---------- helpers ----------
+
+/** Normalize an API suggestion into the shape the chips render. */
+function toDisplaySuggestion(s: CategorySuggestion): DisplaySuggestion {
+  return {
+    id: s.categoryId,
+    name: s.name,
+    path: s.path,
+    depth: Math.max(0, s.path.split(' › ').length - 1),
+    probability: s.probability,
+  }
+}
 
 /** Round money to two decimals. */
 function round2(n: number) {

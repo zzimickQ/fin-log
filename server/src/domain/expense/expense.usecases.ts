@@ -6,6 +6,10 @@ import { familyRepository } from "../family/family.repository.js";
 import { ledgerRepository } from "../ledger/ledger.repository.js";
 import { badRequest, notFound } from "../../lib/errors.js";
 import {
+  suggestExpenseCategory,
+  type SuggestionLogger,
+} from "./category-suggestion.usecases.js";
+import {
   requireFamilyMembership,
   requireLedgerAccess,
 } from "../../lib/guards.js";
@@ -174,10 +178,39 @@ export async function createExpense(
     occurredAt?: string;
     categoryId?: string | null;
     paidById?: string | null;
+    /** Let the server predict and assign a category when none was given. */
+    autoCategorize?: boolean;
   },
+  logger?: SuggestionLogger,
 ) {
   const ledger = await requireLedgerAccess(userId, ledgerId);
-  await validateLinks(ledger.familyId, ledgerId, input);
+
+  // Capture-first, categorize-later: an explicit category (or null) always
+  // wins. Only when the caller omits one and asks for it do we predict, and
+  // then only assign when the model is confident (otherwise it stays null).
+  const requestedCategoryId = input.categoryId ?? null;
+  const categoryId =
+    requestedCategoryId === null && input.autoCategorize
+      ? (
+          await suggestExpenseCategory(
+            userId,
+            ledgerId,
+            {
+              description: input.description ?? "",
+              ...(input.amount !== undefined ? { amount: input.amount } : {}),
+              ...(input.currency ? { currency: input.currency } : {}),
+              ...(input.note ? { note: input.note } : {}),
+              ...(input.occurredAt ? { occurredAt: input.occurredAt } : {}),
+            },
+            logger,
+          )
+        ).autoAssignCategoryId
+      : requestedCategoryId;
+
+  await validateLinks(ledger.familyId, ledgerId, {
+    categoryId,
+    paidById: input.paidById ?? null,
+  });
 
   const expense = await expenseRepository.create({
     ledgerId,
@@ -187,7 +220,7 @@ export async function createExpense(
     description: input.description ?? null,
     note: input.note ?? null,
     occurredAt: input.occurredAt ? new Date(input.occurredAt) : new Date(),
-    categoryId: input.categoryId ?? null,
+    categoryId,
     paidById: input.paidById ?? null,
   });
   return toExpenseDto(expense);

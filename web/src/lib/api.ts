@@ -1,6 +1,7 @@
 import { createFetch } from '@better-fetch/fetch'
 import type {
   CategoryNode,
+  CategorySuggestionResult,
   Expense,
   FamilyDetail,
   FamilyMember,
@@ -287,6 +288,8 @@ export const api = {
       categoryId?: string | null
       paidById?: string | null
       currency?: string
+      /** Ask the server to predict and assign a category when none is given. */
+      autoCategorize?: boolean
     },
   ) =>
     unwrap(
@@ -335,6 +338,27 @@ export const api = {
   /** All ledgers across the user's families (navbar switcher). */
   myLedgers: () =>
     unwrap(betterFetch<{ ledgers: MyLedger[] }>('/ledgers/mine')),
+
+  /**
+   * Predict the best category for an expense from its text plus the ledger's
+   * existing categories and categorized expenses.
+   */
+  suggestCategory: (
+    ledgerId: string,
+    data: {
+      description: string
+      amount?: number
+      currency?: string
+      note?: string
+      occurredAt?: string
+    },
+  ) =>
+    unwrap(
+      betterFetch<CategorySuggestionResult>(
+        `/ledgers/${ledgerId}/expense-suggestions`,
+        { method: 'POST', body: data },
+      ),
+    ),
 
   /** Assign categories to many expenses in one transaction. */
   categorizeBatch: (items: { expenseId: string; categoryId: string }[]) =>

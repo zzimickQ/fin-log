@@ -53,6 +53,37 @@ export function useLedgerCategoriesQuery(ledgerId: string | null) {
   })
 }
 
+/**
+ * TypeSafe category predictions for a draft expense. Keyed on the (debounced)
+ * description and amount; disabled until there is enough text to classify.
+ */
+export function useCategorySuggestionsQuery(
+  ledgerId: string | null,
+  input: { description: string; amount?: number; currency?: string },
+) {
+  const description = input.description.trim()
+  return useQuery({
+    queryKey: [
+      'ledgers',
+      ledgerId ?? '',
+      'category-suggestions',
+      description,
+      input.amount ?? 0,
+    ],
+    queryFn: () =>
+      api.suggestCategory(ledgerId!, {
+        description,
+        ...(input.amount !== undefined ? { amount: input.amount } : {}),
+        ...(input.currency ? { currency: input.currency } : {}),
+      }),
+    enabled: ledgerId !== null && description.length >= 2,
+    // A given description/amount pair predicts the same category; avoid
+    // re-billing the model when the user moves back and forth in the wizard.
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
+  })
+}
+
 export function useExpensesQuery(
   ledgerId: string | null,
   filters: LedgerFilters,

@@ -8,9 +8,9 @@
 #   (cd server && npm ci && npm run build)   # → server/dist
 #   docker build -t finlog-server .
 #
-# In CI (.github/workflows/ci.yml) the web and server jobs build these dists
-# and upload them as artifacts; the docker job downloads them into the build
-# context before `docker build`.
+# In CI (.github/workflows/ci.yml) a single job builds these dists in the
+# runner and runs `docker build` on the resulting context directly (no
+# artifact upload/download).
 
 FROM node:24-alpine
 ENV NODE_ENV=production

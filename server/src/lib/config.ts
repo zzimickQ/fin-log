@@ -27,11 +27,24 @@ const envSchema = z.object({
     .string()
     .default("upload")
     .transform((p) => path.resolve(p)),
+
+  // --- TypeSafe AI (category suggestions) ---
+  // Optional. When unset, expense categorization falls back to the local
+  // token-overlap heuristic (never breaks expense logging).
+  TYPESAFE_API_KEY: z.string().default(""),
+  // System One model used for predictions (see docs.typesafe.ai/models).
+  TYPESAFE_MODEL: z.string().default("jev-latest"),
+  // Minimum P(top category) for the server to auto-assign instead of merely
+  // suggesting. "unknown" never auto-assigns.
+  CATEGORY_AUTO_ASSIGN_THRESHOLD: z.coerce.number().min(0).max(1).default(0.85),
+  // How many ranked category suggestions the API returns to the UI.
+  CATEGORY_SUGGESTION_LIMIT: z.coerce.number().int().min(1).max(10).default(3),
 });
 
 const parsed = envSchema.safeParse({
   ...process.env,
   WEB_ORIGIN: process.env.WEB_ORIGIN?.split(","),
+  TYPESAFE_API_KEY: process.env.TYPESAFE_API_KEY?.trim(),
 });
 
 if (!parsed.success) {

@@ -1,9 +1,10 @@
-# CI: build the web app, build the API server, and package the Docker image
-# from those built outputs.
+# CI: build the web app and the API server in the runner, then package the
+# Docker image from those outputs in the same job.
 #
-# The web/server jobs upload their `dist` folders as artifacts; the docker job
-# downloads them into the build context and the Dockerfile only installs npm
-# packages and copies the outputs in (no building inside the image).
+# Everything happens in one job so the built `dist` folders stay on the runner
+# and are handed straight to `docker build` — no artifact upload/download.
+# The Dockerfile itself stays packaging-only (it installs npm packages and
+# copies the outputs in; it builds nothing).
 #
 # The image is pushed to GHCR (`ghcr.io/<owner>/<repo>`) on pushes to main
 # and on semver tags; pull requests only build (no push).
@@ -21,66 +22,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-web:
-    name: Build web
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install dependencies
-        working-directory: web
-        run: npm ci
-
-      - name: Build
-        working-directory: web
-        run: npm run build
-
-      - name: Upload web build
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-dist
-          path: web/dist
-          if-no-files-found: error
-
-  build-server:
-    name: Build server
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: server/package-lock.json
-
-      - name: Install dependencies
-        working-directory: server
-        run: npm ci
-
-      # npm run build = prisma generate && tsc. prisma.config.ts falls back to
-      # a placeholder URL when DATABASE_URL is unset, so no database is needed
-      # here.
-      - name: Build
-        working-directory: server
-        run: npm run build
-
-      - name: Upload server build
-        uses: actions/upload-artifact@v4
-        with:
-          name: server-dist
-          path: server/dist
-          if-no-files-found: error
-
   docker:
     name: Docker image
-    needs: [build-web, build-server]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -88,19 +31,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Reuse the outputs built in the jobs above (the Dockerfile does not
-      # build anything — it only installs packages and copies these in).
-      - name: Download web build
-        uses: actions/download-artifact@v4
+      - uses: actions/setup-node@v4
         with:
-          name: web-dist
-          path: web/dist
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            server/package-lock.json
 
-      - name: Download server build
-        uses: actions/download-artifact@v4
-        with:
-          name: server-dist
-          path: server/dist
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build web
+        working-directory: web
+        run: npm run build
+
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+
+      # npm run build = prisma generate && tsc. prisma.config.ts falls back to
+      # a placeholder URL when DATABASE_URL is unset, so no database is needed.
+      - name: Build server
+        working-directory: server
+        run: npm run build
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

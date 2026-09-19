@@ -11,6 +11,7 @@ import {
   recentExpenses,
   updateExpense,
 } from "../domain/expense/expense.usecases.js";
+import { suggestExpenseCategory } from "../domain/expense/category-suggestion.usecases.js";
 
 const errorSchema = z.object({ message: z.string() });
 
@@ -48,6 +49,24 @@ const expenseListSchema = z.object({
 
 const amountSchema = z.coerce.number().finite().nonnegative();
 
+const categorySuggestionSchema = z.object({
+  categoryId: z.string(),
+  name: z.string(),
+  path: z.string(),
+  description: z.string().nullable(),
+  probability: z.number(),
+});
+
+const categorySuggestionsSchema = z.object({
+  suggestions: z.array(categorySuggestionSchema),
+  unknown: z.boolean(),
+  autoAssignCategoryId: z.string().nullable(),
+  confidence: z.number(),
+  probability: z.number(),
+  degraded: z.boolean(),
+  model: z.string().nullable(),
+});
+
 export async function expenseRoutes(app: FastifyInstance) {
   const routes = app.withTypeProvider<ZodTypeProvider>();
 
@@ -83,6 +102,39 @@ export async function expenseRoutes(app: FastifyInstance) {
     },
   });
 
+  // ---------- suggest a category for a new expense ----------
+
+  routes.post("/api/ledgers/:ledgerId/expense-suggestions", {
+    schema: {
+      summary: "Predict the best category for an expense from its text",
+      description:
+        "Uses the expense description plus the ledger's existing categories and categorized expenses as context. " +
+        "Returns ranked suggestions; `unknown: true` means no existing category fits (leave uncategorized). " +
+        "`autoAssignCategoryId` is set only when the prediction is confident. Falls back to a local heuristic " +
+        "(`degraded: true`) when TypeSafe is unconfigured or unavailable.",
+      tags: ["expenses"],
+      security: [{ sessionCookie: [] }],
+      params: z.object({ ledgerId: z.string() }),
+      body: z.object({
+        description: z.string().trim().min(1).max(200),
+        amount: amountSchema.optional(),
+        currency: z.string().min(2).max(8).optional(),
+        note: z.string().trim().max(2000).optional(),
+        occurredAt: z.string().datetime().optional(),
+      }),
+      response: { 200: categorySuggestionsSchema, 400: errorSchema, 401: errorSchema, 403: errorSchema, 404: errorSchema },
+    },
+    handler: async (request) => {
+      const session = await requireSession(request);
+      return suggestExpenseCategory(
+        session.user.id,
+        request.params.ledgerId,
+        request.body,
+        request.log,
+      );
+    },
+  });
+
   // ---------- create an expense (capture first) ----------
 
   routes.post("/api/ledgers/:ledgerId/expenses", {
@@ -101,6 +153,7 @@ export async function expenseRoutes(app: FastifyInstance) {
         occurredAt: z.string().datetime().optional(),
         categoryId: z.string().nullable().optional(),
         paidById: z.string().nullable().optional(),
+        autoCategorize: z.boolean().optional(),
       }),
       response: { 201: expenseSchema, 400: errorSchema, 401: errorSchema, 403: errorSchema, 404: errorSchema },
     },
@@ -110,6 +163,7 @@ export async function expenseRoutes(app: FastifyInstance) {
         session.user.id,
         request.params.ledgerId,
         request.body,
+        request.log,
       );
       reply.code(201);
       return expense;

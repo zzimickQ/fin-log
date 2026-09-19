@@ -77,11 +77,11 @@ On startup the container runs `prisma migrate deploy` (skippable with
 then starts the server. Static assets are served with long-lived immutable
 cache headers; `index.html`, `sw.js` and Workbox files are `no-cache`.
 
-GitHub Actions (`.github/workflows/ci.yml`) builds the web app and the server
-and uploads their `dist` folders as artifacts; the docker job downloads those
-artifacts into the build context and packages the image (no building inside
-the image). The image is pushed to GHCR (`ghcr.io/<owner>/<repo>`) on pushes
-to `main` and on `v*` tags. Pull requests build but do not push.
+GitHub Actions (`.github/workflows/ci.yml`) does everything in one job: it
+builds the web app and the server in the runner, then packages the image from
+those `dist` folders directly — no artifact upload/download round-trip. The
+image itself builds nothing. It is pushed to GHCR (`ghcr.io/<owner>/<repo>`) on
+pushes to `main` and on `v*` tags. Pull requests build but do not push.
 
 ## Scripts
 
@@ -161,6 +161,28 @@ does not emit it yet, so `scripts/merge-auth-schema.mjs` patches the Account
 model with `issuer String` + `@@unique([issuer, accountId])` after every
 `npm run auth:generate`.
 
+### Smart category suggestions (TypeSafe)
+
+`POST /api/ledgers/:ledgerId/expense-suggestions` predicts the best category
+for a draft expense from its text alone, using *only* data the ledger already
+has as context: the full category hierarchy (path + description), how often
+each category is used, and the descriptions of recently categorized expenses.
+It asks TypeSafe's System One model ([`@typesafe-ai/sdk`](https://docs.typesafe.ai/sdk/javascript),
+`jev-latest`) one `Choice` question that includes an explicit `unknown` option.
+
+The response carries ranked `suggestions`, an `unknown` flag (no category
+fits → leave the expense uncategorized), and `autoAssignCategoryId`, which is
+set only when the top category's probability clears
+`CATEGORY_AUTO_ASSIGN_THRESHOLD`. `POST /api/ledgers/:ledgerId/expenses` also
+accepts `autoCategorize: true` to predict and assign in one call when no
+`categoryId` was supplied.
+
+If `TYPESAFE_API_KEY` is unset or the API call fails, the endpoint silently
+falls back to a local token-overlap heuristic and marks the response
+`degraded: true`. Suggestions alone are returned in that mode; the server
+never auto-assigns from the heuristic. Logging an expense therefore never
+depends on TypeSafe being reachable. The API key is only ever read server-side.
+
 ### Rate limiting
 
 Better Auth rate limiting is enabled (memory storage). Sign-in/sign-up are
@@ -176,13 +198,17 @@ rules; in development, IPs resolve to `127.0.0.1` (set `NODE_ENV`).
 
 ### Environment variables
 
-| Variable             | Default            | Purpose                                 |
-| -------------------- | ------------------ | --------------------------------------- |
-| `NODE_ENV`           | `development`      | Dev/test/production mode                |
-| `HOST` / `PORT`      | `0.0.0.0` / `3000` | Listen address                          |
-| `DATABASE_URL`       | —                  | Postgres connection string              |
-| `BETTER_AUTH_SECRET` | —                  | ≥32 chars (`openssl rand -base64 32`)   |
-| `BETTER_AUTH_URL`    | —                  | Public base URL of this server          |
-| `WEB_ORIGIN`         | —                  | Comma-separated allowed web origins     |
-| `WEB_DIST_PATH`      | unset (disabled)   | Path to a built web app to serve        |
-| `SKIP_MIGRATIONS`    | `0`                 | `1` disables migrate-on-start (container)|
+| Variable                         | Default            | Purpose                                   |
+| -------------------------------- | ------------------ | ----------------------------------------- |
+| `NODE_ENV`                       | `development`      | Dev/test/production mode                  |
+| `HOST` / `PORT`                  | `0.0.0.0` / `3000` | Listen address                            |
+| `DATABASE_URL`                   | —                  | Postgres connection string                |
+| `BETTER_AUTH_SECRET`             | —                  | ≥32 chars (`openssl rand -base64 32`)     |
+| `BETTER_AUTH_URL`                | —                  | Public base URL of this server            |
+| `WEB_ORIGIN`                     | —                  | Comma-separated allowed web origins       |
+| `WEB_DIST_PATH`                  | unset (disabled)   | Path to a built web app to serve          |
+| `SKIP_MIGRATIONS`                | `0`                | `1` disables migrate-on-start (container) |
+| `TYPESAFE_API_KEY`               | unset              | Enables TypeSafe category suggestions     |
+| `TYPESAFE_MODEL`                 | `jev-latest`       | System One model for predictions          |
+| `CATEGORY_AUTO_ASSIGN_THRESHOLD` | `0.85`             | Min P(top) to auto-assign a category      |
+| `CATEGORY_SUGGESTION_LIMIT`      | `3`                | Ranked suggestions returned to the UI     |

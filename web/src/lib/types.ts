@@ -85,3 +85,27 @@ export interface Expense {
 export interface RecentExpense extends Expense {
   ledger: { id: string; name: string; family: { id: string; name: string } }
 }
+
+/** One ranked category prediction for a new expense. */
+export interface CategorySuggestion {
+  categoryId: string
+  name: string
+  path: string
+  description: string | null
+  /** Model probability for this category (0–1). */
+  probability: number
+}
+
+/** Result of POST /ledgers/:ledgerId/expense-suggestions. */
+export interface CategorySuggestionResult {
+  suggestions: CategorySuggestion[]
+  /** No existing category fits — the expense should stay uncategorized. */
+  unknown: boolean
+  /** Set only when the server is confident enough to assign automatically. */
+  autoAssignCategoryId: string | null
+  confidence: number
+  probability: number
+  /** True when TypeSafe was unavailable and a local heuristic answered. */
+  degraded: boolean
+  model: string | null
+}

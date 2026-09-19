@@ -137,6 +137,23 @@ export const expenseRepository = {
     return prisma.expense.delete({ where: { id: expenseId } });
   },
 
+  /**
+   * Most recent categorized expenses of a ledger (description + categoryId),
+   * used as few-shot context when predicting a category for a new expense.
+   */
+  recentCategorized(ledgerId: string, limit: number) {
+    return prisma.expense.findMany({
+      where: {
+        ledgerId,
+        categoryId: { not: null },
+        description: { not: null },
+      },
+      select: { description: true, categoryId: true },
+      orderBy: { occurredAt: "desc" },
+      take: limit,
+    });
+  },
+
   /** id + ledger + current category for batch categorization. */
   findBulkMeta(expenseIds: string[]) {
     return prisma.expense.findMany({
