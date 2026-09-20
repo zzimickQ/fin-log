@@ -21,9 +21,11 @@ export function AppShell() {
   const location = useLocation()
 
   // The active-ledger switcher only makes sense for the capture flows —
-  // hide it inside the admin area, where ledgers are managed, not "current".
+  // hide it inside the admin area, where ledgers are managed, not "current",
+  // and on the log-expense wizard, which asks for a ledger as its own step.
   const inAdmin = location.pathname.startsWith('/admin')
-  const showLedgerSwitcher = signedIn && !inAdmin
+  const inLog = location.pathname.startsWith('/log')
+  const showLedgerSwitcher = signedIn && !inAdmin && !inLog
 
   // Load the switcher data and keep the active ledger valid only when
   // signed in (public pages don't need it).

@@ -1,17 +1,23 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useActiveLedgerRow } from '@/lib/active-ledger'
 import {
   useCategorySuggestionsQuery,
   useCreateExpenseMutation,
   useLedgerCategoriesQuery,
+  useLedgerSuggestionsQuery,
+  useMyLedgersQuery,
 } from '@/lib/queries'
 import { toast } from '@/lib/stores'
 import { flattenCategories, guessCategories } from '@/lib/category-helpers'
 import { formatMoney } from '@/lib/format'
 import { useDebouncedValue } from '@/lib/use-debounced-value'
 import { useIsMobile } from '@/lib/use-media'
-import type { CategoryNode, CategorySuggestion, MyLedger } from '@/lib/types'
+import type {
+  CategoryNode,
+  CategorySuggestion,
+  LedgerSuggestion,
+  MyLedger,
+} from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -31,10 +37,11 @@ const TAX_RATE = 0.15
 const STEPS = [
   { id: 1, label: 'Amount' },
   { id: 2, label: 'Details' },
-  { id: 3, label: 'Category' },
+  { id: 3, label: 'Ledger' },
+  { id: 4, label: 'Category' },
 ]
 
-/** A suggestion normalized for display from either TypeSafe or the heuristic. */
+/** A category suggestion normalized for display (TypeSafe or heuristic). */
 interface DisplaySuggestion {
   id: string
   name: string
@@ -44,14 +51,24 @@ interface DisplaySuggestion {
   probability: number
 }
 
+/** A ledger suggestion normalized for display (TypeSafe or heuristic). */
+interface DisplayLedgerSuggestion {
+  ledgerId: string
+  name: string
+  familyName: string
+  /** 0 when the suggestion came from the local heuristic. */
+  probability: number
+}
+
 export function LogExpensePage() {
-  const { ledger, isPending } = useActiveLedgerRow()
+  const { data, isPending } = useMyLedgersQuery()
+  const ledgers = data?.ledgers ?? []
 
   if (isPending) {
     return <p className="text-sm text-muted-foreground">Loading…</p>
   }
 
-  if (!ledger) {
+  if (ledgers.length === 0) {
     return (
       <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-16 text-center">
         <Wallet className="size-8 text-muted-foreground" />
@@ -66,29 +83,26 @@ export function LogExpensePage() {
     )
   }
 
-  // `key` resets the draft whenever the active ledger changes.
-  return <ExpenseFlow key={ledger.id} ledger={ledger} />
+  // The wizard picks its own ledger, so it is not keyed to the active one.
+  return <ExpenseFlow ledgers={ledgers} />
 }
 
-// ---------- the 3-step wizard ----------
+// ---------- the 4-step wizard ----------
 
-function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
+function ExpenseFlow({ ledgers }: { ledgers: MyLedger[] }) {
   const isMobile = useIsMobile()
-  const categoriesQuery = useLedgerCategoriesQuery(ledger.id)
   const createExpense = useCreateExpenseMutation()
 
-  const [step, setStep] = useState<1 | 2 | 3>(1)
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
   const [amount, setAmount] = useState('0')
   const [withTax, setWithTax] = useState(false)
   const [description, setDescription] = useState('')
+  // null = untouched, so a confident prediction can pre-select the ledger.
+  // A string is an explicit choice and always wins.
+  const [ledgerSelection, setLedgerSelection] = useState<string | null>(null)
   // null = untouched, so a confident prediction can auto-select the category.
   // A string (including '') is an explicit choice and always wins.
   const [categorySelection, setCategorySelection] = useState<string | null>(null)
-
-  const categories = useMemo(
-    () => categoriesQuery.data?.categories ?? [],
-    [categoriesQuery.data],
-  )
 
   const baseAmount = Number(amount)
   const amountValid = Number.isFinite(baseAmount) && baseAmount > 0
@@ -96,18 +110,55 @@ function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
   const recordedAmount = withTax ? round2(baseAmount * (1 + TAX_RATE)) : baseAmount
   const saving = createExpense.isPending
 
-  // --- category suggestions ------------------------------------------------
   // TypeSafe predictions are debounced so the model is not called on every
-  // keystroke. The local heuristic fills the gap while the request is in
-  // flight, and when the server runs degraded (no API key / offline).
+  // keystroke. The ledger and category steps both key off the same text.
   const debouncedDescription = useDebouncedValue(description.trim(), 350)
-  const suggestionsQuery = useCategorySuggestionsQuery(ledger.id, {
+
+  // --- ledger suggestions --------------------------------------------------
+  const ledgerSuggestionsQuery = useLedgerSuggestionsQuery({
+    description: debouncedDescription,
+    amount: recordedAmount,
+  })
+  const ledgerModelResult = ledgerSuggestionsQuery.data
+  // Auto-select: a confident prediction (or the only ledger) supplies the
+  // ledger until the user makes an explicit choice.
+  const autoLedgerId = ledgerModelResult?.autoAssignLedgerId ?? ''
+  const ledgerId = ledgerSelection ?? autoLedgerId
+  const ledger = ledgers.find((l) => l.id === ledgerId) ?? null
+  const ledgerAutoAssigned = ledgerSelection === null && autoLedgerId !== ''
+
+  const ledgerSuggestions: DisplayLedgerSuggestion[] = useMemo(
+    () =>
+      ledgerModelResult && !ledgerModelResult.unknown
+        ? ledgerModelResult.suggestions.map(toDisplayLedgerSuggestion)
+        : [],
+    [ledgerModelResult],
+  )
+
+  const ledgerHint = useMemo(() => {
+    if (ledgerAutoAssigned) {
+      return 'Pre-selected from the description. Change it if it looks wrong.'
+    }
+    if (ledgerModelResult?.degraded && ledgerModelResult.suggestions.length > 0) {
+      return 'Basic match from your ledger data.'
+    }
+    return undefined
+  }, [ledgerModelResult, ledgerAutoAssigned])
+
+  // --- category suggestions (scoped to the chosen ledger) ------------------
+  const categoriesQuery = useLedgerCategoriesQuery(ledger?.id ?? null)
+  const categories = useMemo(
+    () => categoriesQuery.data?.categories ?? [],
+    [categoriesQuery.data],
+  )
+
+  const suggestionsQuery = useCategorySuggestionsQuery(ledger?.id ?? null, {
     description: debouncedDescription,
     amount: recordedAmount,
   })
   const localSuggestions = useMemo(
-    () => guessCategories(description, categories),
-    [description, categories],
+    () => (ledger ? guessCategories(description, categories) : []),
+    [ledger, description, categories],
   )
 
   const modelResult = suggestionsQuery.data
@@ -127,6 +178,7 @@ function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
   const autoAssigned = categorySelection === null && autoCategoryId !== ''
 
   const suggestionHint = useMemo(() => {
+    if (!ledger) return undefined
     if (modelResult?.unknown) {
       return 'No existing category fits this expense — it will be saved as unknown (uncategorized).'
     }
@@ -137,7 +189,14 @@ function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
       return 'Basic match from your ledger data.'
     }
     return undefined
-  }, [modelResult, autoAssigned])
+  }, [ledger, modelResult, autoAssigned])
+
+  function selectLedger(id: string) {
+    setLedgerSelection(id)
+    // Categories are per-ledger, so a category chosen for another ledger must
+    // not carry over.
+    setCategorySelection(null)
+  }
 
   function selectCategory(id: string) {
     setCategorySelection(id)
@@ -149,18 +208,17 @@ function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
   }
 
   function nextFromDetails() {
-    // Categories still loading: wait so we know whether to show step 3.
-    if (categoriesQuery.isPending) return
-    // No categories in this ledger? Skip the optional step and save.
-    if (categories.length === 0) {
-      void save()
-      return
-    }
+    if (!description.trim()) return
     setStep(3)
   }
 
+  function nextFromLedger() {
+    if (!ledger) return
+    setStep(4)
+  }
+
   async function save() {
-    if (!amountValid || saving || !description.trim()) return
+    if (!amountValid || saving || !description.trim() || !ledger) return
     try {
       await createExpense.mutateAsync({
         ledgerId: ledger.id,
@@ -176,6 +234,7 @@ function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
       setAmount('0')
       setWithTax(false)
       setDescription('')
+      setLedgerSelection(null)
       setCategorySelection(null)
       setStep(1)
       toast.success('Expense recorded')
@@ -189,7 +248,9 @@ function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Log expense</h1>
         <p className="truncate text-sm text-muted-foreground">
-          {ledger.familyName}
+          {ledger
+            ? `${ledger.name} · ${ledger.familyName}`
+            : 'Choose a ledger for this expense'}
         </p>
       </div>
 
@@ -217,7 +278,7 @@ function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
             >
               {s.label}
             </span>
-            {i < STEPS.length - 1 && <span className="h-px w-6 bg-border sm:w-10" />}
+            {i < STEPS.length - 1 && <span className="h-px w-4 bg-border sm:w-8" />}
           </div>
         ))}
       </div>
@@ -242,12 +303,22 @@ function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
               withTax={withTax}
               description={description}
               onChangeDescription={setDescription}
-              categoriesPending={categoriesQuery.isPending}
               onBack={() => setStep(1)}
               onNext={nextFromDetails}
             />
           )}
           {step === 3 && (
+            <LedgerStep
+              ledgers={ledgers}
+              suggestions={ledgerSuggestions}
+              ledgerId={ledgerId}
+              onChange={selectLedger}
+              hint={ledgerHint}
+              onBack={() => setStep(2)}
+              onNext={nextFromLedger}
+            />
+          )}
+          {step === 4 && (
             <CategoryStep
               categories={categories}
               suggestions={suggestions}
@@ -255,7 +326,7 @@ function ExpenseFlow({ ledger }: { ledger: MyLedger }) {
               onChange={selectCategory}
               saving={saving}
               hint={suggestionHint}
-              onBack={() => setStep(2)}
+              onBack={() => setStep(3)}
               onSave={() => void save()}
             />
           )}
@@ -404,7 +475,6 @@ function DetailsStep({
   withTax,
   description,
   onChangeDescription,
-  categoriesPending,
   onBack,
   onNext,
 }: {
@@ -412,7 +482,6 @@ function DetailsStep({
   withTax: boolean
   description: string
   onChangeDescription: (v: string) => void
-  categoriesPending: boolean
   onBack: () => void
   onNext: () => void
 }) {
@@ -468,21 +537,15 @@ function DetailsStep({
               Amount includes 15% tax
             </span>
           )}
-          <span className="rounded-full bg-muted px-2 py-0.5">
-            Category optional
-          </span>
         </div>
         <div className="flex items-center justify-between">
           <Button type="button" variant="ghost" onClick={onBack}>
             <ArrowLeft />
             Back
           </Button>
-          <Button
-            type="submit"
-            disabled={categoriesPending}
-          >
-            {categoriesPending ? 'Loading…' : 'Next'}
-            {!categoriesPending && <ArrowRight />}
+          <Button type="submit">
+            Next
+            <ArrowRight />
           </Button>
         </div>
       </form>
@@ -490,7 +553,116 @@ function DetailsStep({
   )
 }
 
-// ---------- step 3: optional category ----------
+// ---------- step 3: ledger (suggested) ----------
+
+function LedgerStep({
+  ledgers,
+  suggestions,
+  ledgerId,
+  onChange,
+  hint,
+  onBack,
+  onNext,
+}: {
+  ledgers: MyLedger[]
+  suggestions: DisplayLedgerSuggestion[]
+  ledgerId: string
+  onChange: (id: string) => void
+  hint?: string
+  onBack: () => void
+  onNext: () => void
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          Ledger
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Which ledger should this expense go to?
+        </p>
+      </div>
+
+      {(suggestions.length > 0 || hint) && (
+        <div className="flex flex-col gap-1.5">
+          {suggestions.length > 0 && (
+            <>
+              <p className="flex items-center gap-1.5 text-xs font-medium text-foreground/80">
+                <Sparkles className="size-3.5" />
+                Looks like
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {suggestions.map((s) => (
+                  <button
+                    key={s.ledgerId}
+                    type="button"
+                    onClick={() => onChange(s.ledgerId)}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors',
+                      ledgerId === s.ledgerId
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-input bg-background hover:bg-muted',
+                    )}
+                  >
+                    {s.name}
+                    <span className="text-xs opacity-70">{s.familyName}</span>
+                    {s.probability > 0 && (
+                      <span className="text-xs tabular-nums opacity-70">
+                        {Math.round(s.probability * 100)}%
+                      </span>
+                    )}
+                    {ledgerId === s.ledgerId && <Check className="size-3.5" />}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+        </div>
+      )}
+
+      <div className="flex max-h-64 flex-col gap-1 overflow-y-auto pr-1">
+        {ledgers.map((l) => (
+          <button
+            key={l.id}
+            type="button"
+            onClick={() => onChange(l.id)}
+            className={cn(
+              'flex items-center justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors',
+              ledgerId === l.id
+                ? 'bg-primary text-primary-foreground'
+                : 'hover:bg-muted',
+            )}
+          >
+            <span className="min-w-0">
+              <span className="block truncate font-medium">{l.name}</span>
+              <span className="block truncate text-xs opacity-70">
+                {l.familyName}
+                {l.expenseCount > 0
+                  ? ` · ${l.expenseCount} expense${l.expenseCount === 1 ? '' : 's'}`
+                  : ''}
+              </span>
+            </span>
+            {ledgerId === l.id && <Check className="size-4 shrink-0" />}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between border-t pt-3">
+        <Button type="button" variant="ghost" onClick={onBack}>
+          <ArrowLeft />
+          Back
+        </Button>
+        <Button type="button" onClick={onNext} disabled={!ledgerId}>
+          Next
+          <ArrowRight />
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------- step 4: optional category ----------
 
 function CategoryStep({
   categories,
@@ -615,13 +787,25 @@ function CategoryStep({
 
 // ---------- helpers ----------
 
-/** Normalize an API suggestion into the shape the chips render. */
+/** Normalize an API category suggestion into the shape the chips render. */
 function toDisplaySuggestion(s: CategorySuggestion): DisplaySuggestion {
   return {
     id: s.categoryId,
     name: s.name,
     path: s.path,
     depth: Math.max(0, s.path.split(' › ').length - 1),
+    probability: s.probability,
+  }
+}
+
+/** Normalize an API ledger suggestion into the shape the chips render. */
+function toDisplayLedgerSuggestion(
+  s: LedgerSuggestion,
+): DisplayLedgerSuggestion {
+  return {
+    ledgerId: s.ledgerId,
+    name: s.name,
+    familyName: s.familyName,
     probability: s.probability,
   }
 }

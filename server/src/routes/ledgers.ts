@@ -10,6 +10,7 @@ import {
   updateLedger,
 } from "../domain/ledger/ledger.usecases.js";
 import { ledgerCategoryBreakdown, ledgerTotals } from "../domain/expense/expense.usecases.js";
+import { suggestExpenseLedger } from "../domain/expense/ledger-suggestion.usecases.js";
 
 const errorSchema = z.object({ message: z.string() });
 
@@ -24,6 +25,27 @@ const ledgerSchema = z.object({
 });
 
 const ledgerListSchema = z.object({ ledgers: z.array(ledgerSchema) });
+
+const amountSchema = z.coerce.number().finite().nonnegative();
+
+const ledgerSuggestionSchema = z.object({
+  ledgerId: z.string(),
+  name: z.string(),
+  familyId: z.string(),
+  familyName: z.string(),
+  description: z.string().nullable(),
+  probability: z.number(),
+});
+
+const ledgerSuggestionsSchema = z.object({
+  suggestions: z.array(ledgerSuggestionSchema),
+  unknown: z.boolean(),
+  autoAssignLedgerId: z.string().nullable(),
+  confidence: z.number(),
+  probability: z.number(),
+  degraded: z.boolean(),
+  model: z.string().nullable(),
+});
 
 export async function ledgerRoutes(app: FastifyInstance) {
   const routes = app.withTypeProvider<ZodTypeProvider>();
@@ -57,6 +79,33 @@ export async function ledgerRoutes(app: FastifyInstance) {
     handler: async (request) => {
       const session = await requireSession(request);
       return listMyLedgers(session.user.id);
+    },
+  });
+
+  // ---------- suggest a ledger for a new expense ----------
+
+  routes.post("/api/ledgers/expense-suggestions", {
+    schema: {
+      summary: "Predict the best ledger for an expense from its text",
+      description:
+        "Uses the expense description plus the ledgers the user keeps (names, descriptions, usage) as context. " +
+        "Returns ranked suggestions; `unknown: true` means no ledger clearly fits. " +
+        "`autoAssignLedgerId` is set only when the prediction is confident (or the user has a single ledger). " +
+        "Falls back to a local heuristic (`degraded: true`) when TypeSafe is unconfigured or unavailable.",
+      tags: ["ledgers"],
+      security: [{ sessionCookie: [] }],
+      body: z.object({
+        description: z.string().trim().min(1).max(200),
+        amount: amountSchema.optional(),
+        currency: z.string().min(2).max(8).optional(),
+        note: z.string().trim().max(2000).optional(),
+        occurredAt: z.string().datetime().optional(),
+      }),
+      response: { 200: ledgerSuggestionsSchema, 400: errorSchema, 401: errorSchema },
+    },
+    handler: async (request) => {
+      const session = await requireSession(request);
+      return suggestExpenseLedger(session.user.id, request.body, request.log);
     },
   });
 

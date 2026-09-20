@@ -163,6 +163,25 @@ export const expenseRepository = {
   },
 
   /**
+   * The most recent expense descriptions of each ledger, used as few-shot
+   * context when predicting which ledger a new expense belongs to. One
+   * indexed query per ledger (caller bounds the ledger list).
+   */
+  recentDescriptionsByLedgers(ledgerIds: string[], perLedger: number) {
+    if (ledgerIds.length === 0) return Promise.resolve([]);
+    return Promise.all(
+      ledgerIds.map((ledgerId) =>
+        prisma.expense.findMany({
+          where: { ledgerId, description: { not: null } },
+          select: { ledgerId: true, description: true },
+          orderBy: { occurredAt: "desc" },
+          take: perLedger,
+        }),
+      ),
+    ).then((rows) => rows.flat());
+  },
+
+  /**
    * Apply each category to its expense ids in one transaction. Returns the
    * number of rows affected per group.
    */

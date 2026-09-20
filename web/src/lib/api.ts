@@ -7,6 +7,7 @@ import type {
   FamilyMember,
   FamilyRole,
   FamilySummary,
+  LedgerSuggestionResult,
   LedgerSummary,
   MyLedger,
   RecentExpense,
@@ -366,6 +367,24 @@ export const api = {
       betterFetch<{ count: number }>('/expenses/categorize-batch', {
         method: 'POST',
         body: { items },
+      }),
+    ),
+
+  /**
+   * Predict the best ledger for an expense from its text plus every ledger
+   * the user keeps (names, descriptions, usage).
+   */
+  suggestLedger: (data: {
+    description: string
+    amount?: number
+    currency?: string
+    note?: string
+    occurredAt?: string
+  }) =>
+    unwrap(
+      betterFetch<LedgerSuggestionResult>('/ledgers/expense-suggestions', {
+        method: 'POST',
+        body: data,
       }),
     ),
 }

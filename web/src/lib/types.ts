@@ -109,3 +109,28 @@ export interface CategorySuggestionResult {
   degraded: boolean
   model: string | null
 }
+
+/** One ranked ledger prediction for a new expense. */
+export interface LedgerSuggestion {
+  ledgerId: string
+  name: string
+  familyId: string
+  familyName: string
+  description: string | null
+  /** Model probability for this ledger (0–1). */
+  probability: number
+}
+
+/** Result of POST /ledgers/expense-suggestions. */
+export interface LedgerSuggestionResult {
+  suggestions: LedgerSuggestion[]
+  /** No ledger is a clear fit — the user must pick one manually. */
+  unknown: boolean
+  /** Set only when the server is confident enough to pre-select. */
+  autoAssignLedgerId: string | null
+  confidence: number
+  probability: number
+  /** True when TypeSafe was unavailable and a local heuristic answered. */
+  degraded: boolean
+  model: string | null
+}

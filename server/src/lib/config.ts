@@ -39,6 +39,13 @@ const envSchema = z.object({
   CATEGORY_AUTO_ASSIGN_THRESHOLD: z.coerce.number().min(0).max(1).default(0.85),
   // How many ranked category suggestions the API returns to the UI.
   CATEGORY_SUGGESTION_LIMIT: z.coerce.number().int().min(1).max(10).default(3),
+
+  // --- TypeSafe AI (ledger suggestions) ---
+  // Minimum P(top ledger) for the server to pre-select a ledger instead of
+  // merely suggesting it. "unknown" never pre-selects.
+  LEDGER_AUTO_ASSIGN_THRESHOLD: z.coerce.number().min(0).max(1).default(0.85),
+  // How many ranked ledger suggestions the API returns to the UI.
+  LEDGER_SUGGESTION_LIMIT: z.coerce.number().int().min(1).max(10).default(3),
 });
 
 const parsed = envSchema.safeParse({

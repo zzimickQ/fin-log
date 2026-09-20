@@ -84,6 +84,33 @@ export function useCategorySuggestionsQuery(
   })
 }
 
+/**
+ * TypeSafe ledger predictions for a draft expense. Keyed on the (debounced)
+ * description and amount; disabled until there is enough text to classify.
+ * Not tied to the active ledger — the user picks one in the capture flow.
+ */
+export function useLedgerSuggestionsQuery(input: {
+  description: string
+  amount?: number
+  currency?: string
+}) {
+  const description = input.description.trim()
+  return useQuery({
+    queryKey: ['ledger-suggestions', description, input.amount ?? 0],
+    queryFn: () =>
+      api.suggestLedger({
+        description,
+        ...(input.amount !== undefined ? { amount: input.amount } : {}),
+        ...(input.currency ? { currency: input.currency } : {}),
+      }),
+    enabled: description.length >= 2,
+    // A given description/amount pair predicts the same ledger; avoid
+    // re-billing the model when the user moves back and forth in the wizard.
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
+  })
+}
+
 export function useExpensesQuery(
   ledgerId: string | null,
   filters: LedgerFilters,
