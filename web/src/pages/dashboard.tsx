@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ChevronRight, Plus, Users, Wallet } from 'lucide-react'
+import { ChevronRight, KeyRound, Plus, Users, Wallet } from 'lucide-react'
 
 const roleLabel: Record<string, string> = {
   OWNER: 'Owner',
@@ -169,6 +169,28 @@ export function DashboardPage() {
           ))}
         </div>
       )}
+
+      {/* Account-level settings that aren't tied to one family. */}
+      <Card className="relative">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <KeyRound className="size-4" />
+            API keys
+          </CardTitle>
+          <CardDescription>
+            Let external apps submit data to your account with a key instead
+            of your password.
+          </CardDescription>
+        </CardHeader>
+        <Link
+          to="/admin/api-keys"
+          className="absolute inset-0 rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          aria-label="Manage API keys"
+        >
+          <span className="sr-only">Manage API keys</span>
+        </Link>
+        <ChevronRight className="absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground" />
+      </Card>
     </div>
   )
 }

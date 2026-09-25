@@ -99,6 +99,14 @@ export const ledgerSchema = z.object({
 })
 export type LedgerValues = z.infer<typeof ledgerSchema>
 
+// ---------- API keys ----------
+
+/** Label for a key; the secret itself is generated (and shown once) server-side. */
+export const apiKeySchema = z.object({
+  name: z.string({ message: 'Enter a name' }).trim().min(1, 'Name is required').max(100),
+})
+export type ApiKeyValues = z.infer<typeof apiKeySchema>
+
 // ---------- category ----------
 
 export const categorySchema = z.object({

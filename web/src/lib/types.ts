@@ -134,3 +134,18 @@ export interface LedgerSuggestionResult {
   degraded: boolean
   model: string | null
 }
+
+/** An API key as listed — the secret is never part of this shape. */
+export interface ApiKeySummary {
+  id: string
+  name: string
+  /** Display-only leading part of the key, e.g. "fl_ab12cd34". */
+  prefix: string
+  lastUsedAt: string | null
+  createdAt: string
+}
+
+/** POST /api-keys response. `key` is the plaintext, returned exactly once. */
+export interface CreatedApiKey extends ApiKeySummary {
+  key: string
+}

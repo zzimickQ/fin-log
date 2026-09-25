@@ -25,6 +25,7 @@ export const queryKeys = {
     ['ledgers', ledgerId, 'categories'] as const,
   recentExpenses: (limit: number) => ['expenses', 'recent', limit] as const,
   myLedgers: ['ledgers', 'mine'] as const,
+  apiKeys: ['api-keys'] as const,
 }
 
 // ---------- queries ----------
@@ -568,6 +569,34 @@ export function useDeleteExpenseMutation() {
     onSuccess: (_data, { ledgerId, familyId }) => {
       clearLedgerCaches(qc, ledgerId, familyId)
     },
+    onError: onMutationError,
+  })
+}
+
+// ---------- API keys ----------
+
+export function useApiKeysQuery() {
+  return useQuery({
+    queryKey: queryKeys.apiKeys,
+    queryFn: () => api.listApiKeys(),
+  })
+}
+
+/** Resolves to the created key including its one-time plaintext `key`. */
+export function useCreateApiKeyMutation() {
+  const invalidate = useInvalidate()
+  return useMutation({
+    mutationFn: (name: string) => api.createApiKey(name),
+    onSuccess: () => invalidate([queryKeys.apiKeys]),
+    onError: onMutationError,
+  })
+}
+
+export function useRevokeApiKeyMutation() {
+  const invalidate = useInvalidate()
+  return useMutation({
+    mutationFn: (keyId: string) => api.revokeApiKey(keyId),
+    onSuccess: () => invalidate([queryKeys.apiKeys]),
     onError: onMutationError,
   })
 }

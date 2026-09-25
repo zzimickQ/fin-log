@@ -1,6 +1,7 @@
 import { AppShell } from '@/components/app-shell'
 import { ProtectedRoute } from '@/components/protected-route'
 import { AnalyticsPage } from '@/pages/analytics'
+import { ApiKeysPage } from '@/pages/api-keys'
 import { CategorizePage } from '@/pages/categorize'
 import { DashboardPage } from '@/pages/dashboard'
 import { FamilyLayout } from '@/pages/family-layout'
@@ -40,6 +41,7 @@ export default function App() {
             <Route path="admin">
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<DashboardPage />} />
+              <Route path="api-keys" element={<ApiKeysPage />} />
               <Route path="families/:familyId" element={<FamilyLayout />}>
                 <Route index element={<Navigate to="ledgers" replace />} />
                 <Route path="ledgers" element={<LedgersPage />} />

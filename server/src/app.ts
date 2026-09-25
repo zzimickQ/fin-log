@@ -14,6 +14,7 @@ import { registerStatic } from "./plugins/static.js";
 import { registerUploads } from "./plugins/upload.js";
 import { authRoutes } from "./routes/auth.js";
 import { analyticsRoutes } from "./routes/analytics.js";
+import { apiKeyRoutes } from "./routes/api-keys.js";
 import { categoryRoutes } from "./routes/categories.js";
 import { expenseRoutes } from "./routes/expenses.js";
 import { familyRoutes } from "./routes/families.js";
@@ -96,6 +97,7 @@ export function buildApp(): FastifyInstance {
 
   app.register(authRoutes);
   app.register(analyticsRoutes);
+  app.register(apiKeyRoutes);
   app.register(healthRoutes);
   app.register(meRoutes);
   app.register(familyRoutes);

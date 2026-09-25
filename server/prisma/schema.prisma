@@ -54,6 +54,37 @@ model FamilyMember {
   @@map("family_member")
 }
 
+/// User-scoped credential for external clients that submit data on behalf of
+/// one user. Only the SHA-256 of the secret is stored; the plaintext key is
+/// returned once at creation and can never be read back.
+model ApiKey {
+  id     String @id @default(cuid())
+  userId String
+
+  /// Human label chosen in the admin UI ("Zapier", "phone shortcut").
+  name String
+
+  /// SHA-256 hex of the full key. Keys are 256-bit random, so a fast hash is
+  /// enough — no bcrypt work factor needed.
+  keyHash String @unique
+
+  /// Display-only leading part of the key ("fl_ab12cd34"); identifies a key
+  /// in lists once the plaintext is gone.
+  prefix String
+
+  /// Last time the key authenticated a request. Written by the ingest
+  /// endpoints built on top of this.
+  lastUsedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("api_key")
+}
+
 model Ledger {
   id       String @id @default(cuid())
   familyId String

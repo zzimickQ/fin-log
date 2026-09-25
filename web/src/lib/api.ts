@@ -1,7 +1,9 @@
 import { createFetch } from '@better-fetch/fetch'
 import type {
+  ApiKeySummary,
   CategoryNode,
   CategorySuggestionResult,
+  CreatedApiKey,
   Expense,
   FamilyDetail,
   FamilyMember,
@@ -387,4 +389,19 @@ export const api = {
         body: data,
       }),
     ),
+
+  // ---- API keys (external submissions; managed in /admin/api-keys) ----
+
+  /** The current user's keys — secret material is never returned. */
+  listApiKeys: () =>
+    unwrap(betterFetch<{ keys: ApiKeySummary[] }>('/api-keys')),
+
+  /** Creates a key and returns its plaintext exactly once. */
+  createApiKey: (name: string) =>
+    unwrap(
+      betterFetch<CreatedApiKey>('/api-keys', { method: 'POST', body: { name } }),
+    ),
+
+  revokeApiKey: (keyId: string) =>
+    unwrap(betterFetch<void>(`/api-keys/${keyId}`, { method: 'DELETE' })),
 }
