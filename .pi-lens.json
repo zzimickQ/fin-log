@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/apmantza/pi-lens/master/docs/schema/pi-lens-config-v1.json",
+  "//": "prisma/ holds a MULTI-FILE schema (prisma.config.ts -> schema: 'prisma/'), where auth-schema.prisma declares the generator/datasource/auth tables and schema.prisma adds the domain models. Per-file validation cannot work: `prisma validate --schema auth-schema.prisma` cannot see FamilyMember/Expense/ApiKey/IncomingTransaction, so every cross-file relation is reported as 'Type X is neither a built-in type...'. Real validation runs in the build via `prisma validate` + `prisma generate` (directory-wide). Suppress per-file lens scanning of that directory rather than contorting the schema layout, which better-auth regeneration depends on.",
+  "ignore": ["server/prisma/**"],
+  "rules": {
+    "prisma-multifile-schema": {
+      "disable": ["schema"]
+    }
+  }
+}

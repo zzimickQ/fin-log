@@ -30,6 +30,25 @@ export const apiKeyRepository = {
   },
 
   /**
+   * Resolve a presented key by its hash (the ingest auth path). Returns only
+   * the owner id — the caller already holds the plaintext.
+   */
+  findByHash(keyHash: string) {
+    return prisma.apiKey.findUnique({
+      where: { keyHash },
+      select: { id: true, userId: true },
+    });
+  },
+
+  /** Record that a key just authenticated a request. */
+  touch(keyId: string, at: Date) {
+    return prisma.apiKey.update({
+      where: { id: keyId },
+      data: { lastUsedAt: at },
+    });
+  },
+
+  /**
    * Delete one key, scoped to its owner in the WHERE clause so a foreign id
    * simply matches nothing. Returns the affected count.
    */

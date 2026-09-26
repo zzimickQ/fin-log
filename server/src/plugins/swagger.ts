@@ -37,6 +37,17 @@ export const registerSwagger = fp(async function registerSwagger(
             in: "cookie",
             name: "better-auth.session_token",
           },
+          // Machine-facing auth for /api/ingest/* (see lib/guards.ts).
+          // Documented as the header automations usually send; the server also
+          // accepts a bare `X-API-Key` header.
+          apiKey: {
+            type: "apiKey",
+            in: "header",
+            name: "Authorization",
+            description:
+              "API key created under Admin › API keys. Send as `Bearer fl_...` " +
+              "or in an `X-API-Key` header.",
+          },
         },
       },
     },

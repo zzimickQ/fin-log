@@ -6,11 +6,13 @@ import { Button } from '@/components/ui/button'
 import { LedgerSwitcher } from '@/components/ledger-switcher'
 import { Toaster } from '@/components/toaster'
 import { UserMenu } from '@/components/user-menu'
-import { ChartColumnBig, Home, Settings, Wallet } from 'lucide-react'
+import { ChartColumnBig, Home, Inbox, Settings, Wallet } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const mainNav = [
   { to: '/', label: 'Today', icon: Home, end: true },
+  // The capture-review queue sits beside Today: both are daily-use flows.
+  { to: '/review', label: 'Review', icon: Inbox, end: false },
   { to: '/analytics', label: 'Analytics', icon: ChartColumnBig, end: false },
   { to: '/admin/dashboard', label: 'Admin', icon: Settings, end: false },
 ]
@@ -67,6 +69,14 @@ export function AppShell() {
                         <span className="hidden md:inline">Today</span>
                       </NavLink>
                       <NavLink
+                        to="/review"
+                        className={navLinkClass}
+                        title="Review"
+                      >
+                        <Inbox className="size-4" />
+                        <span className="hidden md:inline">Review</span>
+                      </NavLink>
+                      <NavLink
                         to="/analytics"
                         className={navLinkClass}
                         title="Analytics"
@@ -116,7 +126,7 @@ export function AppShell() {
           (standalone mode; index.html sets viewport-fit=cover). */}
       {signedIn && (
         <nav className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
-          <div className="mx-auto grid max-w-md grid-cols-3">
+          <div className="mx-auto grid max-w-md grid-cols-4">
             {mainNav.map(({ to, label, icon: Icon, end }) => (
               <NavLink
                 key={to}

@@ -85,6 +85,43 @@ model ApiKey {
   @@map("api_key")
 }
 
+/// A transaction parsed out of an inbound message (a bank SMS forwarded by a
+/// phone automation) that has not been reviewed yet.
+///
+/// Deliberately ledgerless: the message says nothing about *why* money moved,
+/// so a human picks the ledger and category during review, and the row is then
+/// moved into `Expense` and deleted. `source` doubles as the temporary label
+/// until someone supplies a real description.
+model IncomingTransaction {
+  id     String @id @default(cuid())
+  userId String
+
+  /// Where the message came from — the SMS sender ("CBE", "Awash Bank").
+  /// Used as the temporary label until a real description is entered.
+  source String?
+
+  /// The raw message, kept verbatim for review and provenance.
+  text String
+
+  amount   Decimal @db.Decimal(14, 2)
+  currency String  @default("ETB")
+
+  /// When the message was received. Distinct from createdAt because the phone
+  /// automation may deliver a message some time after it actually arrived.
+  occurredAt DateTime
+
+  /// Label typed during review; becomes the expense description when moved.
+  description String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, occurredAt])
+  @@map("incoming_transaction")
+}
+
 model Ledger {
   id       String @id @default(cuid())
   familyId String

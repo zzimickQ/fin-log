@@ -19,6 +19,8 @@ import { categoryRoutes } from "./routes/categories.js";
 import { expenseRoutes } from "./routes/expenses.js";
 import { familyRoutes } from "./routes/families.js";
 import { healthRoutes } from "./routes/health.js";
+import { incomingRoutes } from "./routes/incoming.js";
+import { ingestRoutes } from "./routes/ingest.js";
 import { ledgerRoutes } from "./routes/ledgers.js";
 import { meRoutes } from "./routes/me.js";
 
@@ -104,6 +106,10 @@ export function buildApp(): FastifyInstance {
   app.register(ledgerRoutes);
   app.register(categoryRoutes);
   app.register(expenseRoutes);
+  // Inbound message capture (machine-facing, API key) and its review side
+  // (session-facing) — see routes/ingest.ts and routes/incoming.ts.
+  app.register(ingestRoutes);
+  app.register(incomingRoutes);
 
   // Last: serves the built web app + SPA fallback (no-op unless
   // WEB_DIST_PATH is configured). Uploads are served first so /upload files

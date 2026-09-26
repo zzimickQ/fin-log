@@ -1,6 +1,8 @@
 import {
   TypeSafeClient,
   choice,
+  type ChoiceCriteria,
+  type ChoiceQuestion,
   type EntryType,
   type JsonValue,
 } from "@typesafe-ai/sdk";
@@ -47,6 +49,47 @@ export interface ChoicePrediction {
   model: string;
 }
 
+/** One Choice question: the judgment to make and its labelled outcomes. */
+export interface ChoiceSpec {
+  instructions: EntryType;
+  criteria: Record<string, EntryType>;
+}
+
+/**
+ * Ask several Choice questions in ONE round trip, answers keyed by question
+ * name. Each answer is a separate judgment, so callers get independent
+ * dimensions (e.g. "is this a debit?" and "which number is the amount?") for
+ * a single request's latency and cost.
+ *
+ * Throws on any transport/API error; callers own the fallback policy.
+ */
+export async function askChoices(
+  state: Record<string, JsonValue>,
+  questions: Record<string, ChoiceSpec>,
+): Promise<Record<string, ChoicePrediction>> {
+  const built: Record<string, ChoiceQuestion<ChoiceCriteria>> = {};
+  for (const [name, spec] of Object.entries(questions)) {
+    built[name] = choice(spec.instructions, spec.criteria);
+  }
+
+  const response = await client().systemOne({ state, questions: built });
+
+  const predictions: Record<string, ChoicePrediction> = {};
+  for (const name of Object.keys(questions)) {
+    const answer = response.answers[name];
+    if (!answer) {
+      throw new Error(`TypeSafe returned no answer for question "${name}"`);
+    }
+    predictions[name] = {
+      choice: answer.choice,
+      confidence: answer.confidence,
+      probabilities: { ...answer.probabilities },
+      model: response.model,
+    };
+  }
+  return predictions;
+}
+
 /**
  * Ask one Choice question about a JSON state and return the selected key plus
  * its probability distribution. Throws on any transport/API error; callers
@@ -54,21 +97,11 @@ export interface ChoicePrediction {
  */
 export async function askChoice(
   state: Record<string, JsonValue>,
-  instructions: string,
+  instructions: EntryType,
   criteria: Record<string, EntryType>,
 ): Promise<ChoicePrediction> {
-  const response = await client().systemOne({
-    state,
-    questions: {
-      answer: choice(instructions, criteria),
-    },
-  });
-
-  const answer = response.answers.answer;
-  return {
-    choice: answer.choice,
-    confidence: answer.confidence,
-    probabilities: { ...answer.probabilities },
-    model: response.model,
-  };
+  const answers = await askChoices(state, { answer: { instructions, criteria } });
+  const answer = answers.answer;
+  if (!answer) throw new Error("TypeSafe returned no answer");
+  return answer;
 }

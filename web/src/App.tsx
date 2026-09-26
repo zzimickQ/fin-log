@@ -12,6 +12,7 @@ import { LogExpensePage } from '@/pages/log-expense'
 import { MembersPage } from '@/pages/members'
 import { NotFoundPage } from '@/pages/not-found'
 import { ProfilePage } from '@/pages/profile'
+import { ReviewPage } from '@/pages/review'
 import { SignInPage } from '@/pages/sign-in'
 import { SignUpPage } from '@/pages/sign-up'
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
@@ -31,8 +32,10 @@ export default function App() {
           <Route path="sign-up" element={<SignUpPage />} />
           <Route element={<ProtectedRoute />}>
             {/* Mobile-first flows: log an expense (on-screen keypad on touch
-                devices) and bulk-categorize uncategorized expenses. */}
+                devices), review transactions captured from bank messages, and
+                bulk-categorize uncategorized expenses. */}
             <Route path="log" element={<LogExpensePage />} />
+            <Route path="review" element={<ReviewPage />} />
             <Route path="categorize" element={<CategorizePage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="profile" element={<ProfilePage />} />

@@ -28,3 +28,11 @@ export function notFound(message: string): ApiError {
 export function conflict(message: string): ApiError {
   return new ApiError(409, message);
 }
+/**
+ * The request was well-formed but its content cannot be acted on — e.g. an
+ * inbound SMS that is not a debit transaction. Distinct from 400 (malformed)
+ * so a phone automation can tell "you sent it wrong" from "we won't record it".
+ */
+export function unprocessable(message: string, details?: unknown): ApiError {
+  return new ApiError(422, message, details);
+}

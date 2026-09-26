@@ -196,6 +196,45 @@ rules; in development, IPs resolve to `127.0.0.1` (set `NODE_ENV`).
    `schema: { ... }` with Zod objects — swagger and validation come for free.
 3. Register it in `src/app.ts`.
 
+### Capturing expenses from bank SMS (`src/routes/ingest.ts`)
+
+A phone automation forwards bank messages to `POST /api/ingest/sms`,
+authenticated with a **user API key** (created under Admin › API keys in the
+web app) instead of a session cookie:
+
+```bash
+curl -X POST http://localhost:3000/api/ingest/sms \
+  -H 'Authorization: Bearer fl_...' \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "text": "Your account has been debited with ETB 1,500.00 on 12/09/2025",
+        "source": "CBE",
+        "receivedAt": "2025-09-12T14:35:00Z"
+      }'
+```
+
+- `text` (required) — the message body, ≤2000 chars.
+- `source` — the SMS sender. Doubles as the temporary label until review.
+- `receivedAt` — when the phone received the message (any parseable
+timestamp). Defaults to the server's receipt time; this is the date the
+expense is recorded against.
+
+Responses: `201` staged the transaction, `401` unknown/missing key, `422` the
+message was read but rejected (a credit, or not a transaction at all) with the
+reason in `details`, `400` malformed body.
+
+Only debit transactions are accepted. Amounts are found in code by
+`src/domain/ingest/sms-parser.ts` and **selected** among by Jev, so the model
+chooses from real substrings of the message and cannot invent a figure. When
+TypeSafe is unconfigured or unreachable the parser falls back to keyword
+matching (`degraded: true` in the response) rather than dropping the message.
+
+Staged rows land in `incoming_transaction`, deliberately **ledgerless**: a bank
+message says nothing about which ledger or category the spending belongs to, so
+the reviewer supplies both in the app's Review queue. The row then becomes a
+real `expense` and is deleted; assigning a category during that move is what
+clears it from the queue. See `src/domain/ingest/`.
+
 ### Environment variables
 
 | Variable                         | Default            | Purpose                                   |

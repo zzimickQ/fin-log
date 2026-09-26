@@ -26,6 +26,8 @@ export const queryKeys = {
   recentExpenses: (limit: number) => ['expenses', 'recent', limit] as const,
   myLedgers: ['ledgers', 'mine'] as const,
   apiKeys: ['api-keys'] as const,
+  /** Staged inbound transactions awaiting review (keyed by page size). */
+  incoming: (limit: number) => ['incoming', limit] as const,
 }
 
 // ---------- queries ----------
@@ -597,6 +599,64 @@ export function useRevokeApiKeyMutation() {
   return useMutation({
     mutationFn: (keyId: string) => api.revokeApiKey(keyId),
     onSuccess: () => invalidate([queryKeys.apiKeys]),
+    onError: onMutationError,
+  })
+}
+
+// ---------- inbound message review ----------
+
+/** Staged transactions captured from bank messages. */
+export function useIncomingQuery(limit: number) {
+  return useQuery({
+    queryKey: queryKeys.incoming(limit),
+    queryFn: () => api.listIncoming({ limit }),
+  })
+}
+
+/**
+ * The review list is the only cached view of staged rows, so every review
+ * mutation invalidates it wholesale rather than patching in place.
+ */
+function useInvalidateIncoming() {
+  const qc = useQueryClient()
+  return () => qc.invalidateQueries({ queryKey: ['incoming'] })
+}
+
+export function useLabelIncomingMutation() {
+  const invalidateIncoming = useInvalidateIncoming()
+  return useMutation({
+    mutationFn: (args: { id: string; description: string | null }) =>
+      api.labelIncoming(args.id, args.description),
+    onSuccess: () => void invalidateIncoming(),
+    onError: onMutationError,
+  })
+}
+
+export function useMoveIncomingMutation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (args: {
+      ids: string[]
+      ledgerId: string
+      categoryId?: string | null
+    }) => api.moveIncoming(args),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['incoming'] })
+      // Each staged row became an expense in the chosen ledger, which shifts
+      // that ledger's subtrees, the family totals and the recent list.
+      void qc.invalidateQueries({ queryKey: ['ledgers'] })
+      void qc.invalidateQueries({ queryKey: ['families'] })
+      void qc.invalidateQueries({ queryKey: ['expenses', 'recent'] })
+    },
+    onError: onMutationError,
+  })
+}
+
+export function useDeleteIncomingMutation() {
+  const invalidateIncoming = useInvalidateIncoming()
+  return useMutation({
+    mutationFn: (ids: string[]) => api.deleteIncoming(ids),
+    onSuccess: () => void invalidateIncoming(),
     onError: onMutationError,
   })
 }

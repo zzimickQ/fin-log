@@ -5,6 +5,8 @@ import { FamilyRole } from "../generated/prisma/enums.js";
 import { familyRepository } from "../domain/family/family.repository.js";
 import { ledgerRepository } from "../domain/ledger/ledger.repository.js";
 import { categoryRepository } from "../domain/category/category.repository.js";
+import { apiKeyRepository } from "../domain/apikey/apikey.repository.js";
+import { hashApiKey } from "../domain/apikey/apikey.usecases.js";
 
 export interface Membership {
   id: string;
@@ -26,6 +28,47 @@ export async function requireSession(
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) throw unauthorized();
   return session;
+}
+
+/**
+ * The presented API key, from either supported header. `Authorization: Bearer`
+ * is the conventional form; `X-API-Key` exists because phone-automation tools
+ * (iOS Shortcuts among them) make a bare header far easier to set.
+ */
+function presentedApiKey(request: FastifyRequest): string | null {
+  const header = request.headers.authorization;
+  if (typeof header === "string") {
+    const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+    if (match?.[1]) return match[1].trim();
+  }
+  const raw = request.headers["x-api-key"];
+  if (typeof raw === "string" && raw.trim()) return raw.trim();
+  return null;
+}
+
+/**
+ * Require a valid API key instead of a session — the machine-facing auth path
+ * for external clients that submit data as the key's owner.
+ *
+ * Only the hash of a key is stored, so the presented value is hashed and
+ * looked up; an unknown key and a malformed one are indistinguishable to the
+ * caller (both 401). Returns the owner's user id.
+ */
+export async function requireApiKey(request: FastifyRequest): Promise<string> {
+  const presented = presentedApiKey(request);
+  if (!presented) {
+    throw unauthorized("Provide an API key via 'Authorization: Bearer <key>'");
+  }
+
+  const apiKey = await apiKeyRepository.findByHash(hashApiKey(presented));
+  if (!apiKey) throw unauthorized("Invalid API key");
+
+  // Best-effort usage stamp: a failure here must not reject a valid request.
+  await apiKeyRepository
+    .touch(apiKey.id, new Date())
+    .catch(() => undefined);
+
+  return apiKey.userId;
 }
 
 /** Require `userId` to be a member of the family; returns the membership. */

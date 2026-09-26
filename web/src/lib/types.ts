@@ -149,3 +149,24 @@ export interface ApiKeySummary {
 export interface CreatedApiKey extends ApiKeySummary {
   key: string
 }
+
+/**
+ * A transaction captured from an inbound bank message, awaiting review.
+ *
+ * Ledgerless until review: a bank message never says which ledger or category
+ * the spending belongs to, so a human supplies both and the row then becomes a
+ * real expense. `source` is the SMS sender and doubles as the temporary label
+ * until a `description` is typed.
+ */
+export interface StagedTransaction {
+  id: string
+  source: string | null
+  /** The raw message, kept verbatim so the reviewer can judge the capture. */
+  text: string
+  amount: number
+  currency: string
+  /** When the message was received. */
+  occurredAt: string
+  description: string | null
+  createdAt: string
+}

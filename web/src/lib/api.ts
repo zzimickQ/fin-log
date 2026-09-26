@@ -13,6 +13,7 @@ import type {
   LedgerSummary,
   MyLedger,
   RecentExpense,
+  StagedTransaction,
 } from './types'
 
 /**
@@ -404,4 +405,50 @@ export const api = {
 
   revokeApiKey: (keyId: string) =>
     unwrap(betterFetch<void>(`/api-keys/${keyId}`, { method: 'DELETE' })),
+
+  // ---- inbound message review ----
+
+  /** Staged transactions captured from bank messages, newest received first. */
+  listIncoming: (params: { limit?: number; offset?: number } = {}) =>
+    unwrap(
+      betterFetch<{ transactions: StagedTransaction[]; total: number }>(
+        '/incoming',
+        { query: qs(params) },
+      ),
+    ),
+
+  /** Set (or clear, with null) the label a staged transaction will carry. */
+  labelIncoming: (id: string, description: string | null) =>
+    unwrap(
+      betterFetch<{ transaction: StagedTransaction }>(`/incoming/${id}`, {
+        method: 'PATCH',
+        body: { description },
+      }),
+    ),
+
+  /**
+   * Turn staged transactions into expenses in one ledger. The category is
+   * optional — without it they land uncategorized for the normal categorize
+   * flow.
+   */
+  moveIncoming: (data: {
+    ids: string[]
+    ledgerId: string
+    categoryId?: string | null
+  }) =>
+    unwrap(
+      betterFetch<{ moved: number }>('/incoming/move', {
+        method: 'POST',
+        body: data,
+      }),
+    ),
+
+  /** Discard staged transactions that do not look correct. */
+  deleteIncoming: (ids: string[]) =>
+    unwrap(
+      betterFetch<{ deleted: number }>('/incoming/delete', {
+        method: 'POST',
+        body: { ids },
+      }),
+    ),
 }
